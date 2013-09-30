@@ -24,8 +24,20 @@ var failures = 0
   , mkdir = require("mkdirp")
   , rimraf = require("rimraf")
 
+var PATH = "PATH"
+// As noted in lifecycle.js, windows calls it's path "Path" usually, but this is not guaranteed,
+//  so we will use a variable to change the case of the PATH envvar on Windows to whatever we find
+if (process.platform === "win32") {
+  PATH = "Path"
+  Object.keys(process.env).forEach(function (e) {
+    if (e.match(/^PATH$/i)) {
+      PATH = e
+    }
+  })
+}
+
 var pathEnvSplit = process.platform === "win32" ? ";" : ":"
-  , pathEnv = process.env.PATH.split(pathEnvSplit)
+  , pathEnv = process.env[PATH].split(pathEnvSplit)
   , npmPath = process.platform === "win32" ? root : path.join(root, "bin")
 
 pathEnv.unshift(npmPath, path.join(root, "node_modules", ".bin"))
@@ -45,7 +57,7 @@ env.npm_config_color = "always"
 env.npm_config_global = "true"
 // have to set this to false, or it'll try to test itself forever
 env.npm_config_npat = "false"
-env.PATH = pathEnv.join(pathEnvSplit)
+env[PATH] = pathEnv.join(pathEnvSplit)
 env.NODE_PATH = path.join(root, "node_modules")
 
 
