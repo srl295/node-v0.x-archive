@@ -259,15 +259,27 @@
             'tools/msvs/genfiles/node_perfctr_provider.rc',
           ]
         } ],
-        [ 'v8_postmortem_support=="true"', {
+        # Conditionally include v8 or v8ppc
+        [ 'v8_postmortem_support=="true" and target_arch!="ppc" and target_arch!="ppc64"', {
           'dependencies': [ 'deps/v8/tools/gyp/v8.gyp:postmortem-metadata' ],
         }],
-        [ 'node_shared_v8=="false"', {
+        [ 'v8_postmortem_support=="true" and (target_arch=="ppc" or target_arch=="ppc64")', {
+          'dependencies': [ 'deps/v8ppc/tools/gyp/v8.gyp:postmortem-metadata' ],
+        }],
+        # Conditionally include v8 or v8ppc
+        [ 'node_shared_v8=="false" and target_arch!="ppc" and target_arch!="ppc64"', {
           'sources': [
             'deps/v8/include/v8.h',
             'deps/v8/include/v8-debug.h',
           ],
           'dependencies': [ 'deps/v8/tools/gyp/v8.gyp:v8' ],
+        }],
+        [ 'node_shared_v8=="false" and (target_arch=="ppc" or target_arch=="ppc64")', {
+          'sources': [
+            'deps/v8ppc/include/v8.h',
+            'deps/v8ppc/include/v8-debug.h',
+          ],
+          'dependencies': [ 'deps/v8ppc/tools/gyp/v8.gyp:v8' ],
         }],
 
         [ 'node_shared_zlib=="false"', {
@@ -315,6 +327,11 @@
             '-lkvm',
           ],
         }],
+        [ 'OS=="aix"', {
+          'defines': [
+            '_LINUX_SOURCE_COMPAT',
+          ],
+        }],
         [ 'OS=="solaris"', {
           'libraries': [
             '-lkstat',
@@ -329,10 +346,17 @@
             'PLATFORM="sunos"',
           ],
         }],
+	# Conditionally include v8 or v8ppc
         [
-          'OS=="linux" and node_shared_v8=="false"', {
+          'OS=="linux" and node_shared_v8=="false" and target_arch!="ppc" and target_arch!="ppc64"', {
             'ldflags': [
               '-Wl,--whole-archive <(V8_BASE) -Wl,--no-whole-archive',
+            ],
+        }],
+        [
+          'OS=="linux" and node_shared_v8=="false" and (target_arch=="ppc" or target_arch=="ppc64")', {
+            'ldflags': [
+              '-Wl,--whole-archive <(PRODUCT_DIR)/obj.target/deps/v8ppc/tools/gyp/libv8_base.<(target_arch).a -Wl,--no-whole-archive',
             ],
         }],
       ],
