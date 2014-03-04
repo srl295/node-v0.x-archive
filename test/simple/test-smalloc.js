@@ -33,6 +33,11 @@ var Types = smalloc.Types;
 // sliceOnto is volatile and cannot be exposed to users.
 var sliceOnto = process.binding('smalloc').sliceOnto;
 
+// Helper to determine endian - returns true on little endian platforms
+function isLittleEndian() {
+  return ((new Uint32Array((new Uint8Array([4,3,2,1])).buffer))[0])
+           == 0x01020304;
+}
 
 // verify allocation
 

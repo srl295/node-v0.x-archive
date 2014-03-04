@@ -2,4 +2,4 @@
 ,"version":"9.9.9-9"
 ,"homepage":"http://www.zombo.com/"
 ,"os":["darwin","linux","win32","solaris","haiku","sunos","freebsd","openbsd","netbsd"]
-,"cpu":["arm","mips","ia32","x64","sparc"]}
+,"cpu":["arm","mips","ia32","x64","sparc","ppc","ppc64"]}
