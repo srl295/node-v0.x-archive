@@ -27,9 +27,14 @@
       ['GENERATOR == "ninja" or OS== "mac"', {
         'OBJ_DIR': '<(PRODUCT_DIR)/obj',
         'V8_BASE': '<(PRODUCT_DIR)/libv8_base.<(target_arch).a',
-      }, {
-        'OBJ_DIR': '<(PRODUCT_DIR)/obj.target',
-        'V8_BASE': '<(PRODUCT_DIR)/obj.target/deps/v8/tools/gyp/libv8_base.<(target_arch).a',
+      }],
+      ['GENERATOR != "ninja" and OS!="mac" and target_arch not in "ppc ppc64"', {   
+          'OBJ_DIR': '<(PRODUCT_DIR)/obj.target',
+          'V8_BASE': '<(PRODUCT_DIR)/obj.target/deps/v8/tools/gyp/libv8_base.<(target_arch).a',
+      }],
+      ['GENERATOR != "ninja" and OS!="mac" and target_arch in "ppc ppc64"', {   
+          'OBJ_DIR': '<(PRODUCT_DIR)/obj.target',
+          'V8_BASE': '<(PRODUCT_DIR)/obj.target/deps/v8ppc/tools/gyp/libv8_base.<(target_arch).a',
       }],
     ],
   },
@@ -46,6 +51,10 @@
         'conditions': [
           ['target_arch=="x64"', {
             'msvs_configuration_platform': 'x64',
+          }],
+          ['OS=="aix"', {
+            'cflags': [ '-gxcoff' ],
+            'ldflags': [ '-Wl,-bbigtoc' ],
           }],
         ],
         'msvs_settings': {
@@ -171,7 +180,7 @@
         'cflags': [ '-pthread', ],
         'ldflags': [ '-pthread' ],
       }],
-      [ 'OS in "linux freebsd openbsd solaris android"', {
+      [ 'OS in "linux freebsd openbsd solaris android aix"', {
         'cflags': [ '-Wall', '-Wextra', '-Wno-unused-parameter', ],
         'cflags_cc': [ '-fno-rtti', '-fno-exceptions' ],
         'ldflags': [ '-rdynamic' ],
@@ -189,11 +198,37 @@
             'cflags': [ '-m64' ],
             'ldflags': [ '-m64' ],
           }],
+          [ 'target_arch=="ppc" and OS!="aix"', {
+            'cflags': [ '-m32' ],
+            'ldflags': [ '-m32' ],
+          }],
+          [ 'target_arch=="ppc64" and OS!="aix"', {
+            'cflags': [ '-m64', '-mminimal-toc' ],
+            'ldflags': [ '-m64' ],
+          }],
           [ 'OS=="solaris"', {
             'cflags': [ '-pthreads' ],
             'ldflags': [ '-pthreads' ],
             'cflags!': [ '-pthread' ],
             'ldflags!': [ '-pthread' ],
+          }],
+          [ 'OS=="aix"', {
+            # AIX is missing /usr/include/endian.h
+            'defines': [
+              '__LITTLE_ENDIAN=1234',
+              '__BIG_ENDIAN=4321',
+              '__BYTE_ORDER=__BIG_ENDIAN',
+              '__FLOAT_WORD_ORDER=__BIG_ENDIAN'],
+            'conditions': [
+              [ 'target_arch=="ppc"', {
+                'ldflags': [ '-Wl,-bmaxdata:0x60000000/dsa' ],
+              }],
+              [ 'target_arch=="ppc64"', {
+                'cflags': [ '-maix64' ],
+                'ldflags': [ '-maix64' ],
+              }],
+            ],
+            'ldflags!': [ '-rdynamic' ],
           }],
         ],
       }],

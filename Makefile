@@ -232,7 +232,15 @@ else
 ifeq ($(DESTCPU),arm)
 ARCH=arm
 else
+ifeq ($(DESTCPU),ppc)
+ARCH=ppc
+else
+ifeq ($(DESTCPU),ppc64)
+ARCH=ppc64
+else
 ARCH=x86
+endif
+endif
 endif
 endif
 TARNAME=node-$(VERSION)
