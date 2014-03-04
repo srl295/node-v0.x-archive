@@ -42,6 +42,16 @@
 # include <port.h>
 #endif /* __sun */
 
+#if defined(_AIX)
+#define reqevents events
+#define rtnevents revents
+#include <sys/poll.h>
+#undef reqevents
+#undef rtnevents
+#undef events
+#undef revents
+#endif /* _AIX */
+
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
 # include <CoreServices/CoreServices.h>
 #endif
@@ -89,7 +99,7 @@
 # define UV__POLLHUP  UV__EPOLLHUP
 #endif
 
-#if defined(__sun)
+#if defined(__sun) || defined(_AIX)
 # define UV__POLLIN   POLLIN
 # define UV__POLLOUT  POLLOUT
 # define UV__POLLERR  POLLERR
