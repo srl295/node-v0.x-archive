@@ -46,7 +46,26 @@
 #include <sys/proc.h>
 #include <sys/procfs.h>
 
+#define reqevents events
+#define rtnevents revents
+#include <sys/poll.h>
+#undef reqevents
+#undef rtnevents
+#undef events
+#undef revents
+
 #include <sys/pollset.h>
+#include <ctype.h>
+#include <sys/ahafs_evProds.h>
+
+#include <sys/mntctl.h>
+#include <sys/vmount.h>
+#include <limits.h>
+#include <strings.h>
+#include <sys/vnode.h>
+
+#define RDWR_BUF_SIZE   4096
+#define EQ(a,b)         (strcmp(a,b) == 0)
 
 int uv__platform_loop_init(uv_loop_t* loop, int default_loop) {
   loop->fs_fd = -1;
@@ -449,8 +468,402 @@ void uv_loadavg(double avg[3]) {
 }
 
 
+char *rawname(char *cp) {
+  static char rawbuf[FILENAME_MAX+1];
+  char *dp = rindex(cp, '/');
+
+  if(dp == 0)
+    return (0);
+
+  *dp = 0;
+  strcpy(rawbuf, cp);
+  *dp = '/';
+  strcat(rawbuf, "/r");
+  strcat(rawbuf, dp+1);
+  return (rawbuf);
+}
+
+
+/* NAME:    file_is_a_directory
+ * PURPOSE: Determine whether given pathname pertains to a
+ *   file or a directory
+ * RETURNS:
+ *   1 - YES
+ *   0 - NO
+ */
+int file_is_a_directory(char* filename) {
+  struct stat statbuf;
+  int rc = 0;
+
+  if(stat(filename, &statbuf) < 0) {
+    fprintf(stderr, "file_is_a_directory - Error stating file: %s\n", strerror(errno));
+    return(errno);
+  }
+  if(statbuf.st_type == VDIR) {
+    rc=1;
+  }
+
+  return rc;
+}
+
+
+/* NAME:    is_ahafs_mounted
+ * PURPOSE: This function will check whether AHAFS is mounted.
+ * RETURNS:
+ *   0 - AHAFS is mounted.
+ *  -1 - AHAFS is not mounted
+ */
+int is_ahafs_mounted(void){
+  int rv, i=2;
+  struct vmount *p;
+  int sizeMultiplier = 10;
+  size_t siz = sizeof(struct vmount)*sizeMultiplier;
+  struct vmount *vmt;
+  const char *dev = "/aha";
+  char *obj, *stub;
+
+  if((p = (struct vmount *)malloc(siz)) == (struct vmount *)NULL) {
+    fprintf(stderr, "is_ahafs_mounted - malloc: %s\n", strerror(errno));
+    return(-1);
+  }
+
+  /* Retrieve all mounted filesystems */
+  while(1) {
+    rv = mntctl(MCTL_QUERY,siz,(char*)p);
+    if(rv>0) {
+      break;        /* It worked */
+    }
+    if(rv<0) {
+      fprintf(stderr, "is_ahafs_mounted - mntctl: %s\n", strerror(errno));
+      free(p);
+      return(-1);
+    }
+
+    /* Use a bigger size buffer to hold all mounted filesystems */
+    siz = sizeof(struct vmount)*sizeMultiplier * i;
+    free(p);
+    p = (struct vmount *)malloc(siz);
+
+    if(p == (struct vmount *)NULL) {
+      fprintf(stderr, "is_ahafs_mounted - realloc: %s\n", strerror(errno));
+      return(-1);
+    }
+    i++;
+  }
+
+  /* Look for dev in filesystems mount info */
+  for(vmt = (struct vmount *)p, i = 0; i < rv; i++) {
+    obj = vmt2dataptr(vmt, VMT_OBJECT);     /* device */
+    stub = vmt2dataptr(vmt, VMT_STUB);      /* mount point */
+
+    if(EQ(obj, dev) || EQ(rawname(obj), dev) || EQ(stub, dev)) {
+      free(p);  /* Found a match */
+      return(0);
+    }
+    vmt = (struct vmount *) ((char *) vmt + vmt->vmt_length);
+  }
+
+  /* Error Message*/
+  fprintf(stderr, "/aha is required for monitoring filesystem changes\n");
+  return(-1);
+}
+
+/* NAME:    _mkdir
+ * PURPOSE: Recursive call to mkdir() to create intermediate folders, if any
+ * RETURNS:
+ *  Return code from mkdir call
+ */
+int _mkdir(const char *dir) {
+  char tmp[256];
+  char *p = NULL;
+  size_t len;
+
+  snprintf(tmp, sizeof(tmp),"%s",dir);
+  len = strlen(tmp);
+  if(tmp[len - 1] == '/')
+    tmp[len - 1] = 0;
+  for(p = tmp + 1; *p; p++)
+    if(*p == '/') {
+      *p = 0;
+      mkdir(tmp, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+      *p = '/';
+    }
+  return mkdir(tmp, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+}
+
+/* NAME:    mk_subdirs
+ * PURPOSE: Creates necessary subdirectories in the AIX Event Infrastructure
+ *      file system for monitoring the object specified.
+ * RETURNS:
+ *  Return code from mkdir call
+ */
+int mk_subdirs(char *filename) {
+  char cmd[2048];
+  char *p;
+  int rc=0;
+
+  /* Strip off the monitor file name */
+  p = strrchr(filename, '/');
+
+  if(p == NULL)
+    return(0);
+
+  if(file_is_a_directory(filename) == 1) {
+    sprintf(cmd, "/aha/fs/modDir.monFactory");
+  } else {
+    sprintf(cmd, "/aha/fs/modFile.monFactory");
+  }
+
+  strncat(cmd, filename, (p - filename));
+  rc = _mkdir(cmd);
+
+  if(rc == -1 && errno != EEXIST){
+    fprintf(stderr, "mk_subdirs error: %s\n", strerror(errno));
+  }
+
+  return rc;
+}
+
+
+/* NAME: setup_ahafs
+ * PURPOSE: Checks if /aha is mounted, then proceeds to set up the monitoring
+ *      objects for the specified file.
+ * RETURNS:
+ *   0 - Successfull
+ *   Error otherwise
+ */
+int setup_ahafs(const char* filename, int *fd) {
+  int rc = 0;
+  char   monFileWrStr[RDWR_BUF_SIZE];
+  char   monFile[PATH_MAX];
+  int fileIsADirectory = 0; /* 0 == NO, 1 == YES  */
+
+  /* Create monitor file name for object */
+  fileIsADirectory = file_is_a_directory(filename);
+
+  if(fileIsADirectory == 1) {
+    sprintf(monFile, "/aha/fs/modDir.monFactory");
+  } else {
+    sprintf(monFile, "/aha/fs/modFile.monFactory");
+  }
+
+  if((strlen(monFile) + strlen(filename) + 5) > PATH_MAX) {
+    fprintf(stderr, "Error: Cannot monitor object, path name too long\n");
+    return(ENAMETOOLONG);
+  }
+
+  /* Make the necessary subdirectories for the monitor file */
+  rc = mk_subdirs(filename);
+  if(rc == -1 && errno != EEXIST)
+    return(rc);
+
+  strcat(monFile, filename);
+  strcat(monFile, ".mon");
+
+  *fd = 0; errno = 0;
+
+  /* Open the monitor file, creating it if necessary */
+  *fd = open(monFile, O_CREAT|O_RDWR);
+  if(*fd < 0) {
+    fprintf(stderr, "setup_ahafs - Error opening monitor file: %s\n", strerror(errno));
+    return(*fd);
+  }
+
+  /* Write out the monitoring specifications.
+   * In this case, we are monitoring for a state change event type
+   *    CHANGED=YES
+   * We will be waiting in select call, rather than a read:
+   *    WAIT_TYPE=WAIT_IN_SELECT
+   * We only want minimal information for files:
+   *      INFO_LVL=1
+   * For directories, we want more information to track what file
+   * caused the change
+   *      INFO_LVL=2
+   */
+
+  if(fileIsADirectory == 1) {
+    sprintf(monFileWrStr, "CHANGED=YES;WAIT_TYPE=WAIT_IN_SELECT;INFO_LVL=2");
+  } else {
+    sprintf(monFileWrStr, "CHANGED=YES;WAIT_TYPE=WAIT_IN_SELECT;INFO_LVL=1");
+  }
+
+  rc = write(*fd, monFileWrStr, strlen(monFileWrStr)+1);
+  if(rc < 0) {
+    fprintf(stderr, "setup_ahafs - Error writing to monitor file: %s\n", strerror(errno));
+    return(errno);
+  }
+
+  return(0);
+}
+
+/* NAME:    skip_lines
+ * PURPOSE: Skips a specified number of lines in the buffer passed in.
+ * PARAMETERS:
+ *      p - Address of the pointer to the head of the buffer
+ *      n - The number of lines to skip
+ * RETURNS:
+ *      Total number of lines skipped
+ */
+int skip_lines(char **p, int n) {
+  int lines = 0;
+
+  while(n > 0) {
+    *p = strchr(*p, '\n');
+    if(!p)
+      return(lines);
+
+    (*p)++;
+    n--;
+    lines++;
+  }
+  return(lines);
+}
+
+
+/* NAME:    parse_data
+ * PURPOSE: This function will parse the event occurrence data to figure out
+ *      what event just occurred and take proper action.
+ * PARAMETERS:
+ *      buf - A pointer to the buffer containing the event occurrence data
+ *      err - Indicates if the previous select() call returned an error
+ *            (a different parsing format is required).
+ * RETURNS:
+ *        0 - No corrective action needed.
+ *       -1 - Unrecoverable error in parsing
+ */
+int parse_data(char *buf, int err, int *events, uv_fs_event_t* handle) {
+  int    rc = 0, evp_rc, i;
+  char   *p;
+  char   filename[PATH_MAX]; /* To be used when handling directories */
+
+  p = buf;
+  *events = 0;
+
+  /* Clean the filename buffer*/
+  for(i=0; i<PATH_MAX; i++) {
+    filename[i] = 0;
+  }
+  i=0;
+
+  /* Check for BUF_WRAP */
+  if(strncmp(buf, "BUF_WRAP", strlen("BUF_WRAP")) == 0) {
+    printf("Buffer wrap detected, Some event occurrences lost!\n");
+    return(0);
+  }
+
+  /* Since we are using the default buffer size (4K), and have specified
+   * INFO_LVL=1, we won't see any EVENT_OVERFLOW conditions.  Applications
+   * should check for this keyword if they are using an INFO_LVL of 2 or
+   * higher, and have a buffer size of <= 4K
+   */
+
+  /* Skip to RC_FROM_EVPROD */
+  if(skip_lines(&p, 9) != 9)
+    return(-1);
+
+  if(sscanf(p, "RC_FROM_EVPROD=%d\nEND_EVENT_DATA", &evp_rc) == 1) {
+    int fileIsDirectory = 0; /* NO==0, YES==1, error otherwise*/
+
+    fileIsDirectory = file_is_a_directory(handle->path);
+    if(fileIsDirectory == 1) { /* Directory */
+      if(evp_rc == AHAFS_MODDIR_UNMOUNT || evp_rc == AHAFS_MODDIR_REMOVE_SELF) {
+        /* The directory is no longer available for monitoring */
+        *events = UV_RENAME;
+        handle->dir_filename = NULL;
+      } else {
+        /* A file was added/removed inside the directory */
+        *events = UV_CHANGE;
+
+        /* Get the EVPROD_INFO */
+        if(skip_lines(&p, 1) != 1)
+          return(-1);
+
+        /* Scan out the name of the file that triggered the event*/
+        if(sscanf(p, "BEGIN_EVPROD_INFO\n%sEND_EVPROD_INFO", filename) == 1) {
+          handle->dir_filename = strdup(&filename);
+        } else
+          return(-1);
+        }
+    } else { /* Regular File */
+      if(evp_rc == AHAFS_MODFILE_RENAME)
+        *events = UV_RENAME;
+      else
+        *events = UV_CHANGE;
+    }
+  }
+  else
+    return(-1);
+
+  return(rc);
+}
+
+
+/* This is the internal callback */
+static void uv__ahafs_event(uv_loop_t* loop, uv__io_t* event_watch, unsigned int fflags) {
+  char   resultData[RDWR_BUF_SIZE];
+  int err=0, bytes, rc=0;
+  uv_fs_event_t* handle;
+  int events;
+  int  i=0;
+  char fname[PATH_MAX];
+  char *p;
+
+  handle = container_of(event_watch, uv_fs_event_t, event_watcher);
+
+  /* Clean all the buffers*/
+  for(i=0; i<PATH_MAX; i++) {
+    fname[i] = 0;
+  }
+  i=0;
+
+  /* At this point, we assume that polling has been done on the
+   * file descriptor, so we can just read the AHAFS event occurrence
+   * data and parse its results without having to block anything
+   */
+  bytes = pread(event_watch->fd, resultData, RDWR_BUF_SIZE, 0);
+
+  if(bytes < 0)
+    fprintf(stderr, "uv__ahafs_event - Error reading monitor file: %s\n", strerror(errno));
+  else if(bytes == 0)
+    fprintf(stderr, "uv__ahafs_event - Error reading monitor file:  No data to be read\n");
+  else  /* Parse the data */
+    rc = parse_data(resultData, err, &events, handle);
+
+  /* For directory changes, the name of the files that triggered the change
+   * are never absolute pathnames
+   */
+  if (file_is_a_directory(handle->path) == 1) {
+    p = handle->dir_filename;
+    while(*p != NULL){
+      fname[i]= *p;
+      i++;
+      p++;
+    }
+  } else {
+    /* For file changes, figure out whether filename is absolute or not */
+    if(handle->path[0] == '/') {
+      p = strrchr(handle->path, '/');
+      p++;
+
+      while(*p != NULL) {
+        fname[i]= *p;
+        i++;
+        p++;
+      }
+    }
+  }
+
+  /* Unrecoverable error */
+  if(rc == -1)
+    return;
+  else /* Call the actual JavaScript callback function */
+    handle->cb(handle, &fname, events, 0);
+}
+
+
 int uv_fs_event_init(uv_loop_t* loop, uv_fs_event_t* handle) {
-  return -ENOSYS;
+  uv__handle_init(loop, (uv_handle_t*)handle, UV_FS_EVENT);
+  return 0;
 }
 
 
@@ -458,17 +871,102 @@ int uv_fs_event_start(uv_fs_event_t* handle,
                       uv_fs_event_cb cb,
                       const char* filename,
                       unsigned int flags) {
-  return -ENOSYS;
+  int  fd, rc, i=0, res=0;
+  char cwd[PATH_MAX];
+  char absolutePath[PATH_MAX];
+  char fname[PATH_MAX];
+  char *p;
+
+  /* Clean all the buffers*/
+  for(i=0; i<PATH_MAX; i++) {
+    cwd[i] = 0;
+    absolutePath[i] = 0;
+    fname[i] = 0;
+  }
+  i=0;
+
+  /* Figure out whether filename is absolute or not */
+  if(filename[0] == '/') {
+    /* We have absolute pathname, create the relative pathname*/
+    sprintf(absolutePath, filename);
+    p = strrchr(filename, '/');
+    p++;
+  } else {
+    if(filename[0] == '.' && filename[1] == '/') {
+      /* We have a relative pathname, compose the absolute pathname */
+      sprintf(fname, filename);
+      (void) snprintf(cwd, PATH_MAX-1, "/proc/%lu/cwd", (unsigned long) getpid());
+      res = readlink(cwd, absolutePath, sizeof(absolutePath) - 1);
+      if (res < 0)
+        return res;
+      p = strrchr(absolutePath, '/');
+      p++;
+      p++;
+    } else {
+      /* We have a relative pathname, compose the absolute pathname */
+      sprintf(fname, filename);
+      (void) snprintf(cwd, PATH_MAX-1, "/proc/%lu/cwd", (unsigned long) getpid());
+      res = readlink(cwd, absolutePath, sizeof(absolutePath) - 1);
+      if (res < 0)
+        return res;
+      p = strrchr(absolutePath, '/');
+      p++;
+    }
+    /* Copy to filename buffer */
+    while(filename[i] != NULL) {
+      *p = filename[i];
+      i++;
+      p++;
+    }
+  }
+
+  if(is_ahafs_mounted() == -1) {
+    /* Set errno or return whatever error is appropriate */
+    return -1;
+  }
+
+  /* Setup ahafs */
+  if((rc = setup_ahafs((const char *)absolutePath, &fd)))
+    return rc;
+
+  /* Setup/Initialize all the libuv routines */
+  uv__handle_start(handle); /* FIXME shouldn't start automatically */
+  uv__io_init(&handle->event_watcher, uv__ahafs_event, fd);
+  handle->path = strdup(&absolutePath);
+  handle->cb = cb;
+
+  uv__io_start(handle->loop, &handle->event_watcher, UV__POLLIN);
+
+  return 0;
 }
 
 
 int uv_fs_event_stop(uv_fs_event_t* handle) {
-  return -ENOSYS;
+  int fileIsDirectory = 0; /* NO==0, YES==1, error otherwise*/
+
+  if (!uv__is_active(handle))
+    return -EINVAL;
+
+  uv__io_stop(handle->loop, &handle->event_watcher, UV__POLLIN);
+  uv__handle_stop(handle);
+
+  fileIsDirectory = file_is_a_directory(handle->path);
+  if(fileIsDirectory == 1) {
+    free(handle->dir_filename);
+    handle->dir_filename = NULL;
+  }
+
+  free(handle->path);
+  handle->path = NULL;
+  close(handle->event_watcher.fd);
+  handle->event_watcher.fd = -1;
+
+  return 0;
 }
 
 
 void uv__fs_event_close(uv_fs_event_t* handle) {
-  UNREACHABLE();
+  uv_fs_event_stop(handle);
 }
 
 
