@@ -75,20 +75,19 @@ int uv__platform_loop_init(uv_loop_t* loop, int default_loop) {
   if (loop->backend_fd == -1)
     return -1;
 
-  uv__cloexec(loop->backend_fd, 1);
 
   return 0;
 }
 
 
 void uv__platform_loop_delete(uv_loop_t* loop) {
-  if (loop->fs_fd == -1) {
+  if (loop->fs_fd != -1) {
     close(loop->fs_fd);
     loop->fs_fd = -1;
   }
 
   if (loop->backend_fd != -1) {
-    close(loop->backend_fd);
+    pollset_destroy(loop->backend_fd);
     loop->backend_fd = -1;
   }
 }
