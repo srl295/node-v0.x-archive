@@ -70,7 +70,9 @@
 int uv__platform_loop_init(uv_loop_t* loop, int default_loop) {
   loop->fs_fd = -1;
 
-  loop->backend_fd = pollset_create(256);
+  /* Passing maxfd of -1 should mean the limit is determined
+   * by the user's ulimit or the global limit as per the doc */
+  loop->backend_fd = pollset_create(-1);
 
   if (loop->backend_fd == -1)
     return -1;
@@ -94,6 +96,7 @@ void uv__platform_loop_delete(uv_loop_t* loop) {
 
 void uv__io_poll(uv_loop_t* loop, int timeout) {
   struct pollfd events[1024];
+  struct pollfd pqry;
   struct pollfd* pe;
   struct poll_ctl pc;
   QUEUE* q;
@@ -104,6 +107,7 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
   int count;
   int nfds;
   int i;
+  int qry_rc;
   int add_failed;
 
   if (loop->nfds == 0) {
@@ -128,8 +132,25 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     if (w->events == 0) {
       pc.cmd = PS_ADD;
       if (pollset_ctl(loop->backend_fd, &pc, 1)) {
-        if (errno != EINVAL)
+        if (errno != EINVAL) {
+          fprintf(stderr, "Failed to add file descriptor %d to pollset: %d, aborting at %d...\n", pc.fd, errno, __LINE__);
           abort();
+        }
+        /* Check if the fd is already in the pollset */
+        pqry.fd = pc.fd;
+        qry_rc = pollset_query(loop->backend_fd, &pqry);
+        switch (qry_rc) {
+        case -1: 
+          fprintf(stderr, "Failed to add file descriptor %d to pollset: %d (EINVAL)\n", pc.fd, EINVAL);
+          fprintf(stderr, "Failed to query pollset for file descriptor %d: %d, aborting at %d...\n", pc.fd, errno, __LINE__);
+          abort();
+        case 0:
+          fprintf(stderr, "Failed to add file descriptor %d to pollset: %d (EINVAL)\n", pc.fd, EINVAL);
+          fprintf(stderr, "Pollset does not contain file descriptor %d, aborting at %d...\n", pc.fd, __LINE__);
+          abort();
+        }
+        /* If we got here then the pollset already contained the file descriptor even though
+         * we didn't think it should. This probably shouldn't happen, but we can continue. */
         add_failed = 1;
       }
     }
@@ -138,14 +159,18 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
       /* Could maybe mod if we knew for sure no events are removed, but
        * content of w->events is handled above as not reliable (falls back)
        * so may require a pollset_query() which would have to be pretty cheap
-       * compared to a PS_DELETE to be worth optimising. Altenratively, could
+       * compared to a PS_DELETE to be worth optimising. Alternatively, could
        * lazily remove events, squelching them in the mean time. */
       pc.cmd = PS_DELETE;
-      if (pollset_ctl(loop->backend_fd, &pc, 1))
+      if (pollset_ctl(loop->backend_fd, &pc, 1)) {
+        fprintf(stderr, "Failed to delete file descriptor %d from pollset: %d, aborting at %d...\n", pc.fd, errno, __LINE__);
         abort();
+      }
       pc.cmd = PS_ADD;
-      if (pollset_ctl(loop->backend_fd, &pc, 1))
+      if (pollset_ctl(loop->backend_fd, &pc, 1)) {
+        fprintf(stderr, "Failed to add file descriptor %d to pollset: %d, aborting at %d...\n", pc.fd, errno, __LINE__);
         abort();
+      }
     }
 
     w->events = w->pevents;
@@ -173,8 +198,10 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     }
 
     if (nfds == -1) {
-      if (errno != EINTR)
+      if (errno != EINTR) {
+printf("pollset_poll() failure with errno: %d\n", errno);
         abort();
+      }
 
       if (timeout == -1)
         continue;
