@@ -16,7 +16,7 @@ Unix/Macintosh:
     make
     make install
 
-With libicu i18n support:
+With ICU i18n support: ( Chromium's ICU: older rev, missing some locales?, larger output size )
 
     svn checkout --force --revision 214189 \
         http://src.chromium.org/svn/trunk/deps/third_party/icu46 \
@@ -24,6 +24,38 @@ With libicu i18n support:
     ./configure --with-icu-path=deps/v8/third_party/icu46/icu.gyp
     make
     make install
+
+EXPERIMENTAL: alternate ICU support
+
+   * Unixy systems only - uses shell script / makefile to build
+      * rewrite in python? require cygwin for windows?
+   * Builds a restricted ICU set
+      * English and Root data only
+      * Only the services needed by v8's Intl implementation
+   * Specify an additional icu data file with either:
+      * The `NODE_ICU_DATA` env variable:   `env NODE_ICU_DATA=/some/path node`
+      * The `--icu-data-dir` parameter:   `node --icu-data-dir=/some/path`
+   * Example:  If you use the path `/some/path`, then ICU 53 on a Little Endian (l) system will find, in priority order:
+      * individual files such as `/some/path/icudt53l/root.res`
+      * a packaged data file `/some/path/icudt53l.dat`
+   * Notes:
+      * See `u_setDataDirectory()` and [the ICU Users Guide about Data Loading](http://userguide.icu-project.org/icudata) for many more details.
+      * "53l" will be "53b" on a big endian machine.
+      * To get a "full" icudt53*.dat, goto http://site.icu-project.org/download
+          * for icudt53l.dat: it is present in the source .tgz under icu/source/data/in/icudt53l.dat
+          * for icudt53b.dat: download source and build ICU for your own platform.
+   * TODO:
+      * instead of svn checkout, allow using a 'stock' ICU from http://site.icu-project.org/download with larger output
+      * switch to build 'all data' by default.
+
+    `svn checkout --force http://source.icu-project.org/repos/icu/icu/branches/srl/10919config53 deps/icu`
+
+    `./configure --with-generic-icu=deps/icu`
+
+    `make`
+
+    `make install`
+
 
 If your python binary is in a non-standard location or has a
 non-standard name, run the following instead:

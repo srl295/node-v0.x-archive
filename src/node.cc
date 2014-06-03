@@ -134,6 +134,9 @@ static node_module* modpending;
 static node_module* modlist_builtin;
 static node_module* modlist_addon;
 
+// Path to ICU data (for i18n / Intl)
+static const char* icu_data_dir = NULL;
+
 // used by C++ modules as well
 bool no_deprecation = false;
 
@@ -2927,6 +2930,8 @@ static void PrintHelp() {
          "  --trace-deprecation  show stack traces on deprecations\n"
          "  --v8-options         print v8 command line options\n"
          "  --max-stack-size=val set max v8 stack size (bytes)\n"
+         "  --icu-data-dir=dir   set ICU data load path to dir\n"
+         "                         (overrides NODE_ICU_DATA)\n"
          "\n"
          "Environment variables:\n"
 #ifdef _WIN32
@@ -3028,6 +3033,8 @@ static void ParseArgs(int* argc,
     } else if (strcmp(arg, "--v8-options") == 0) {
       new_v8_argv[new_v8_argc] = "--help";
       new_v8_argc += 1;
+    } else if (strncmp(arg, "--icu-data-dir=", 15) == 0) {
+      icu_data_dir = arg+15;
     } else {
       // V8 option.  Pass through as-is.
       new_v8_argv[new_v8_argc] = arg;
@@ -3379,6 +3386,15 @@ void Init(int* argc,
       v8_is_profiling = true;
       break;
     }
+  }
+
+  if( icu_data_dir == NULL ) {
+    // if the parameter isn't given, use the env variable.
+    icu_data_dir = getenv( "NODE_ICU_DATA" );
+  }
+  // Initialize ICU. If icu_data_dir is NULL here, it will load the 'minimal' data.
+  if(! v8::V8::InitializeICUDirectory( icu_data_dir ) ) {
+    FatalError( NULL, "Could not initialize ICU (check NODE_ICU_DATA or --icu-data-dir parameters)");
   }
 
   // The const_cast doesn't violate conceptual const-ness.  V8 doesn't modify
