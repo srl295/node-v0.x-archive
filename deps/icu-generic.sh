@@ -171,6 +171,10 @@ echo "Building"
 # skip deps..
 #MAKEOPTS='DEPS='
 CORES=${CORES-1}
+
+# multicore build of ICU seems broken (?)
+CORES=1
+
 echo "CORES=${CORES}"
 make -j${CORES} -C "${TARGDIR}" ${MAKEOPTS} || exit 1
 
