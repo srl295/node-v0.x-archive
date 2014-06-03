@@ -172,6 +172,8 @@
             'src/node_i18n.h',
           ],
           'dependencies': [
+            # need to have these here, in this order, so that the static link goes through
+            '<(icu_gyp_path):icui18n',
             '<(icu_gyp_path):icuuc',
           ],
         } ],        
