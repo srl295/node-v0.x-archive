@@ -16,7 +16,7 @@ FULL_ICU="$3"
 if [ "$3" = "true" ];
 then
     SMALL_ICU_DATA=0
-done
+fi
 
 ROOTDIR=`pwd`
 echo "$0 building from $SRCDIR to $TARGDIR"

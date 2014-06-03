@@ -100,7 +100,6 @@
         'src/node_main.cc',
         'src/node_os.cc',
         'src/node_v8.cc',
-        'src/node_i18n.cc',
         'src/node_stat_watcher.cc',
         'src/node_watchdog.cc',
         'src/node_zlib.cc',
@@ -129,7 +128,6 @@
         'src/node_constants.h',
         'src/node_contextify.h',
         'src/node_file.h',
-        'src/node_i18n.h',
         'src/node_http_parser.h',
         'src/node_internals.h',
         'src/node_javascript.h',
@@ -166,6 +164,16 @@
       ],
 
       'conditions': [
+        [ 'v8_enable_i18n_support==1', {
+          'defines': [ 'NODE_HAVE_I18N_SUPPORT=1' ],
+          'sources': [
+            'src/node_i18n.cc',
+            'src/node_i18n.h',
+          ],
+          'dependencies': [
+            '<(icu_gyp_path):icuuc',
+          ],
+        } ],        
         [ 'node_use_openssl=="true"', {
           'defines': [ 'HAVE_OPENSSL=1' ],
           'sources': [

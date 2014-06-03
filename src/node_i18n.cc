@@ -18,10 +18,11 @@
 // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
+#if defined(NODE_HAVE_I18N_SUPPORT) 
 
 #include "node_i18n.h"
 
-// TODO: IFDEF i18n..
+
 
 #include <unicode/udata.h>
 
@@ -73,3 +74,4 @@ bool InitializeICUDirectory(const char* icu_data_path) {
     
   } // namespace i18n 
 } // namespace node
+#endif
