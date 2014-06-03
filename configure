@@ -235,6 +235,11 @@ parser.add_option('--with-generic-icu',
     dest='with_generic_icu',
     help='Path to icu.gyp (ICU i18n, source library)')
 
+parser.add_option('--with-full-icu',
+    action='store_true',
+    dest='with_full_icu',
+    help='Request full ICU. Default is to use a smaller ICU.')
+
 parser.add_option('--with-perfctr',
     action='store_true',
     dest='with_perfctr',
@@ -664,11 +669,12 @@ def configure_icu(o):
   if have_icu_path:
     o['variables']['icu_gyp_path'] = options.with_icu_path
   elif have_generic_icu:
+    o['variables']['icu_full'] = b(options.with_full_icu)
     o['variables']['icu_gyp_path'] = 'deps/icu-generic.gyp'
     o['variables']['icu_path'] = os.path.join(root_dir, options.with_generic_icu)
     print 'Building from generic ICU in %s' % (options.with_generic_icu)
     print 'Configuring and building ICU into out/deps/icu'
-    cmd = 'deps/icu-generic.sh "%s" "%s/out/%s/deps/icu"' % ( options.with_generic_icu, root_dir, o['default_configuration'])
+    cmd = 'deps/icu-generic.sh "%s" "%s/out/%s/deps/icu" "%s"' % ( options.with_generic_icu, root_dir, o['default_configuration'], o['variables']['icu_full'])
     print "# %s" % (cmd)
     if(os.system(cmd)!=0):
       print "failed"
