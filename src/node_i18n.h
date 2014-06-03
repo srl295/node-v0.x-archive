@@ -22,6 +22,8 @@
 #ifndef SRC_NODE_I18N_H_
 #define SRC_NODE_I18N_H_
 
+#if defined(NODE_HAVE_I18N_SUPPORT) 
+
 #include "node.h"
 
 namespace node {
@@ -31,5 +33,7 @@ namespace i18n {
 NODE_EXTERN bool InitializeICUDirectory(const char *icu_data_path);
 }
 }
+
+#endif
 
 #endif
