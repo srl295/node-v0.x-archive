@@ -117,7 +117,7 @@ EOF
 echo "CPPFLAGS=${CPPFLAGS}"
 
 
-
+ORIGDIR=`pwd`
 
 if [ -f "${TARGDIR}/config.status" ];
 then
@@ -127,7 +127,7 @@ else
     ATARGDIR=`pwd`
     # v8-i18n actually uses brkiteration, though not in ES402 as of this writing.
     # UCONFIG_SRL_NO_TEST_API is experimental, http://bugs.icu-project.org/trac/ticket/10919
-    env CPPFLAGS="${CPPFLAGS}" "${SRCDIR}/source/configure" ${CONFIGURE_OPTS} || exit 1
+    env CPPFLAGS="${CPPFLAGS}" "${ORIGDIR}/${SRCDIR}/source/configure" ${CONFIGURE_OPTS} || exit 1
     cd "${ROOTDIR}"
 fi
 
@@ -169,8 +169,10 @@ echo "Building"
 # CORES is set to the number of cores to use
 
 # skip deps..
-MAKEOPTS='DEPS='
-make -j${CORES-1} -C "${TARGDIR}" ${MAKEOPTS} || exit 1
+#MAKEOPTS='DEPS='
+CORES=${CORES-1}
+echo "CORES=${CORES}"
+make -j${CORES} -C "${TARGDIR}" ${MAKEOPTS} || exit 1
 
 echo "Building small static data"
 make -C "${TARGDIR}/data" build-small

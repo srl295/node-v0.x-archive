@@ -18,12 +18,12 @@
 // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
-#if defined(NODE_HAVE_I18N_SUPPORT) 
+
+#if defined(NODE_HAVE_I18N_SUPPORT)
 
 #include "node_i18n.h"
 
-
-
+#include <unicode/putil.h>
 #include <unicode/udata.h>
 
 #define DEBUG_ICU_UTIL 0
@@ -46,9 +46,6 @@ namespace node {
   namespace i18n {
 
 bool InitializeICUDirectory(const char* icu_data_path) {
-#if !defined(V8_I18N_SUPPORT)
-  return true;
-#else
   if(icu_data_path != NULL) {
     u_setDataDirectory(icu_data_path);
 #if DEBUG_ICU_UTIL
@@ -69,9 +66,7 @@ bool InitializeICUDirectory(const char* icu_data_path) {
 #endif
     return (status == U_ZERO_ERROR);
   }
-#endif
 }
-    
-  } // namespace i18n 
+  } // namespace i18n
 } // namespace node
 #endif
