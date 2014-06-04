@@ -22,7 +22,11 @@ ROOTDIR=`pwd`
 echo "$0 building from $SRCDIR to $TARGDIR"
 if [ ! -d "${SRCDIR}" ];
 then
-    echo "Error: ${SRCDIR} not a directory"
+    echo "WARNING: ${SRCDIR} not a directory"
+    echo "Try this: "
+    echo
+    echo "  svn checkout --force http://source.icu-project.org/repos/icu/icu/branches/srl/10919config53 ${SRCDIR}"
+    echo
     exit 1
 fi
 
