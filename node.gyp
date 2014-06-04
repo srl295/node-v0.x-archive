@@ -176,7 +176,14 @@
             '<(icu_gyp_path):icui18n',
             '<(icu_gyp_path):icuuc',
           ],
-        } ],        
+          'conditions': [
+            [
+              'icu_full=="false"', {
+                'defines': [ 'NODE_HAVE_SMALL_ICU=1' ],
+              },
+            ]
+          ],
+        } ],
         [ 'node_use_openssl=="true"', {
           'defines': [ 'HAVE_OPENSSL=1' ],
           'sources': [

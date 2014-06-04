@@ -178,11 +178,16 @@ CORES=1
 echo "CORES=${CORES}"
 make -j${CORES} -C "${TARGDIR}" ${MAKEOPTS} || exit 1
 
-echo "Building small static data"
-make -C "${TARGDIR}/data" build-small
+if [ $SMALL_ICU_DATA -eq 1 ];
+then
+    echo "Building small static data"
+    make -C "${TARGDIR}/data" build-small
 
-echo "Removing the non-stub library"
-make -C "${TARGDIR}/data" cleanlib
+    echo "Removing the non-stub library"
+    make -C "${TARGDIR}/data" cleanlib
+else
+    echo "Full ICU data built."
+fi
 
 echo DONE building ICU
 exit 0

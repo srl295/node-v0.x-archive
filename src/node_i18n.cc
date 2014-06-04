@@ -26,9 +26,10 @@
 #include <unicode/putil.h>
 #include <unicode/udata.h>
 
-#define DEBUG_ICU_UTIL 0
+#define DEBUG_ICU_UTIL 1
 
-#ifndef V8_NO_SMALL_ENTRY_POINT
+#ifdef NODE_HAVE_SMALL_ICU
+// if this is defined, we have a 'secondary' entry point.
 /* compare following to utypes.h defs for U_ICUDATA_ENTRY_POINT */
 #define SMALL_ICUDATA_ENTRY_POINT SMALL_DEF2(U_ICU_VERSION_MAJOR_NUM, U_LIB_SUFFIX_C_NAME)
 #define SMALL_DEF2(major, suff) SMALL_DEF(major,suff)
@@ -56,13 +57,15 @@ bool InitializeICUDirectory(const char* icu_data_path) {
     // TODO: Could verify that /res_index can load?
   } else {
     UErrorCode status = U_ZERO_ERROR;
-#ifndef V8_NO_SMALL_ENTRY_POINT
+#ifdef NODE_HAVE_SMALL_ICU
     // install the 'small' data.
     udata_setCommonData(&SMALL_ICUDATA_ENTRY_POINT, &status);
 #if DEBUG_ICU_UTIL
     puts("SMALL DATA:");
     puts(u_errorName(status));
 #endif
+#else
+    // no small data, so nothing to do.
 #endif
     return (status == U_ZERO_ERROR);
   }

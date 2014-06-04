@@ -44,6 +44,7 @@ EXPERIMENTAL: alternate ICU support
       * To get a "full" icudt53*.dat, goto http://site.icu-project.org/download
           * for icudt53l.dat: it is present in the source .tgz under icu/source/data/in/icudt53l.dat
           * for icudt53b.dat: download source and build ICU for your own platform.
+      * the additional configure option `--with-full-icu` will also build a full ICU, this causes the env var and param mentioned above to become no-ops.
    * TODO:
       * instead of svn checkout, allow using a 'stock' ICU from http://site.icu-project.org/download with larger output
       * switch to build 'all data' by default.
