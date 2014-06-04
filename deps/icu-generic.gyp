@@ -41,13 +41,25 @@
                 'link_settings': {
                     'library_dirs': [
                         '<(PRODUCT_DIR)/deps/icu/lib',
-                        '<(PRODUCT_DIR)/deps/icu/stubdata',
                     ],
                     'libraries': [
                         '-licudata',
-                        '-licusmdata',
                     ],
                 },
+                'conditions': [
+                 [
+                  'icu_full=="false"', {
+                    'link_settings': {
+                      'libraries': [
+                        '-licusmdata',
+                      ],
+                      'library_dirs': [
+                        '<(PRODUCT_DIR)/deps/icu/stubdata',
+                      ],
+                    }
+                  },
+                 ]
+                ],
             },
         },
         {

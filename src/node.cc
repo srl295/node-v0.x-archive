@@ -2932,9 +2932,13 @@ static void PrintHelp() {
          "  --trace-deprecation  show stack traces on deprecations\n"
          "  --v8-options         print v8 command line options\n"
          "  --max-stack-size=val set max v8 stack size (bytes)\n"
-#if defined(NODE_HAVE_I18N_SUPPORT) 
+#if defined(NODE_HAVE_I18N_SUPPORT)
+#if defined(NODE_HAVE_SMALL_ICU)
          "  --icu-data-dir=dir   set ICU data load path to dir\n"
          "                         (overrides NODE_ICU_DATA)\n"
+#else
+         "  --icu-data-dir=dir   This option is ignored for this build.\n"
+#endif
 #endif
          "\n"
          "Environment variables:\n"
@@ -2947,7 +2951,7 @@ static void PrintHelp() {
          "NODE_MODULE_CONTEXTS   Set to 1 to load modules in their own\n"
          "                       global contexts.\n"
          "NODE_DISABLE_COLORS    Set to 1 to disable colors in the REPL\n"
-#if defined(NODE_HAVE_I18N_SUPPORT)
+#if defined(NODE_HAVE_I18N_SUPPORT) && defined(NODE_HAVE_SMALL_ICU)
          "NODE_ICU_DATA          Data path for ICU (Intl object) data\n"
          "\n"
 #endif
@@ -3396,7 +3400,7 @@ void Init(int* argc,
     }
   }
 
-#if defined(NODE_HAVE_I18N_SUPPORT) 
+#if defined(NODE_HAVE_I18N_SUPPORT) && defined(NODE_HAVE_SMALL_ICU)
   if( icu_data_dir == NULL ) {
     // if the parameter isn't given, use the env variable.
     icu_data_dir = getenv( "NODE_ICU_DATA" );
@@ -3406,7 +3410,7 @@ void Init(int* argc,
     FatalError( NULL, "Could not initialize ICU (check NODE_ICU_DATA or --icu-data-dir parameters)");
   }
 #endif
-  
+
   // The const_cast doesn't violate conceptual const-ness.  V8 doesn't modify
   // the argv array or the elements it points to.
   V8::SetFlagsFromCommandLine(&v8_argc, const_cast<char**>(v8_argv), true);
