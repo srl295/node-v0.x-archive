@@ -3401,13 +3401,15 @@ void Init(int* argc,
   }
 
 #if defined(NODE_HAVE_I18N_SUPPORT) && defined(NODE_HAVE_SMALL_ICU)
-  if( icu_data_dir == NULL ) {
+  if ( icu_data_dir == NULL ) {
     // if the parameter isn't given, use the env variable.
-    icu_data_dir = getenv( "NODE_ICU_DATA" );
+    icu_data_dir = getenv("NODE_ICU_DATA");
   }
-  // Initialize ICU. If icu_data_dir is NULL here, it will load the 'minimal' data.
-  if(! node::i18n::InitializeICUDirectory( icu_data_dir ) ) {
-    FatalError( NULL, "Could not initialize ICU (check NODE_ICU_DATA or --icu-data-dir parameters)");
+  // Initialize ICU.
+  // If icu_data_dir is NULL here, it will load the 'minimal' data.
+  if ( !node::i18n::InitializeICUDirectory(icu_data_dir) ) {
+    FatalError(NULL, "Could not initialize ICU "
+                "(check NODE_ICU_DATA or --icu-data-dir parameters)");
   }
 #endif
 

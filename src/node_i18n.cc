@@ -29,10 +29,11 @@
 #define DEBUG_ICU_UTIL 1
 
 #ifdef NODE_HAVE_SMALL_ICU
-// if this is defined, we have a 'secondary' entry point.
-/* compare following to utypes.h defs for U_ICUDATA_ENTRY_POINT */
-#define SMALL_ICUDATA_ENTRY_POINT SMALL_DEF2(U_ICU_VERSION_MAJOR_NUM, U_LIB_SUFFIX_C_NAME)
-#define SMALL_DEF2(major, suff) SMALL_DEF(major,suff)
+/* if this is defined, we have a 'secondary' entry point.
+   compare following to utypes.h defs for U_ICUDATA_ENTRY_POINT */
+#define SMALL_ICUDATA_ENTRY_POINT \
+  SMALL_DEF2(U_ICU_VERSION_MAJOR_NUM, U_LIB_SUFFIX_C_NAME)
+#define SMALL_DEF2(major, suff) SMALL_DEF(major, suff)
 #ifndef U_LIB_SUFFIX_C_NAME
 #define SMALL_DEF(major, suff) icusmdt##major##_dat
 #else
@@ -47,14 +48,13 @@ namespace node {
   namespace i18n {
 
 bool InitializeICUDirectory(const char* icu_data_path) {
-  if(icu_data_path != NULL) {
+  if ( icu_data_path != NULL ) {
     u_setDataDirectory(icu_data_path);
 #if DEBUG_ICU_UTIL
     puts("DATA DIR:");
     puts(icu_data_path);
 #endif
-    return true; // no error
-    // TODO: Could verify that /res_index can load?
+    return true;  // no error
   } else {
     UErrorCode status = U_ZERO_ERROR;
 #ifdef NODE_HAVE_SMALL_ICU
@@ -70,6 +70,6 @@ bool InitializeICUDirectory(const char* icu_data_path) {
     return (status == U_ZERO_ERROR);
   }
 }
-  } // namespace i18n
-} // namespace node
+  }  // namespace i18n
+}  // namespace node
 #endif
