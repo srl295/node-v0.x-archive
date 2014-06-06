@@ -656,34 +656,6 @@ def configure_winsdk(o):
         'from tools/msvs/genfiles.')
 
 
-def configure_icu(o):
-  have_icu_path = bool(options.with_icu_path)
-  have_generic_icu = bool(options.with_generic_icu)
-  i18n_support = int(have_icu_path | have_generic_icu)
-  if (have_icu_path and have_generic_icu):
-    print 'Error: Cannot specify both --with-icu-path and --with-generic-icu'
-    sys.exit(1)
-  o['variables']['v8_enable_i18n_support'] = i18n_support
-  if have_icu_path:
-    o['variables']['icu_gyp_path'] = options.with_icu_path
-  elif have_generic_icu:
-    icu_full_path = os.path.join(root_dir, options.with_generic_icu)
-    o['variables']['icu_full'] = b(options.with_full_icu)
-    o['variables']['icu_gyp_path'] = 'deps/icu-generic.gyp' # rel to node src
-    o['variables']['icu_path'] = icu_full_path
-    print 'Building from generic ICU in %s' % (options.with_generic_icu)
-    print 'Configuring and building ICU into out/deps/icu'
-    cmd_str = 'deps/icu-generic.sh "%s" "%s/out/%s/deps/icu" "%s"'
-    default_config = o['default_configuration']
-    with_full_icu = b(options.with_full_icu)
-    cmd = cmd_str % ( icu_full_path, root_dir, default_config, with_full_icu )
-    print 'Configuring ICU:'
-    print '# %s' % (cmd)
-    if (os.system(cmd)!=0):
-      print 'ICU build failed.'
-      sys.exit(1)
-    print 'ICU built.'
-
 # determine the "flavor" (operating system) we're building for,
 # leveraging gyp's GetFlavor function
 flavor_params = {}
@@ -707,6 +679,38 @@ configure_libuv(output)
 configure_v8(output)
 configure_openssl(output)
 configure_winsdk(output)
+
+def configure_icu(o):
+  have_icu_path = bool(options.with_icu_path)
+  have_generic_icu = bool(options.with_generic_icu)
+  i18n_support = int(have_icu_path | have_generic_icu)
+  if (have_icu_path and have_generic_icu):
+    print 'Error: Cannot specify both --with-icu-path and --with-generic-icu'
+    sys.exit(1)
+  o['variables']['v8_enable_i18n_support'] = i18n_support
+  if have_icu_path:
+    o['variables']['icu_gyp_path'] = options.with_icu_path
+  elif have_generic_icu:
+    icu_full_path = os.path.join(root_dir, options.with_generic_icu)
+    default_config = o['default_configuration']
+    with_full_icu = b(options.with_full_icu)
+    o['variables']['icu_full'] = b(options.with_full_icu)
+    o['variables']['icu_path'] = icu_full_path
+    print 'Building from generic ICU in %s' % (options.with_generic_icu)
+    print 'Configuring and building ICU into out/deps/icu'
+    if flavor == 'win':
+      o['variables']['icu_gyp_path'] = 'deps/icu-generic-win.gyp'
+    else:
+      o['variables']['icu_gyp_path'] = 'deps/icu-generic.gyp'
+      cmd_str = 'deps/icu-generic.sh "%s" "%s/out/%s/deps/icu" "%s"'
+      cmd = cmd_str % ( icu_full_path, root_dir, default_config, with_full_icu )
+      print 'Configuring ICU for %s:' % flavor
+      print '# %s' % (cmd)
+      if (os.system(cmd)!=0):
+        print 'ICU build failed.'
+        sys.exit(1)
+      print 'ICU built.'
+
 configure_icu(output)
 
 # variables should be a root level element,
