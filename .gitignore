@@ -65,3 +65,4 @@ deps/zlib/zlib.target.mk
 /SHASUMS*.txt*
 
 /tools/wrk/wrk
+*.bat~
