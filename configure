@@ -683,7 +683,21 @@ configure_v8(output)
 configure_openssl(output)
 configure_winsdk(output)
 
+def glob_to_var(dir_base, dir_sub):
+  list = []
+  dir_all = os.path.join(dir_base, dir_sub)
+  print "globbing %s + %s = %s" % (dir_base,dir_sub, dir_all)
+  files = os.walk(dir_all)
+  for ent in files:
+    (path,dirs,files) = ent
+    for file in files:
+      if file.endswith(".cpp") or file.endswith(".c") or file.endswith(".h"):
+        list.append(os.path.join(dir_sub, file))
+    break
+  return list
+
 def configure_icu(o):
+  # todo(srl295): move this into a separate module if it is too long?
   have_icu_path = bool(options.with_icu_path)
   have_generic_icu = bool(options.with_generic_icu)
   i18n_support = int(have_icu_path | have_generic_icu)
@@ -702,6 +716,9 @@ def configure_icu(o):
     print 'Building from generic ICU in %s' % (options.with_generic_icu)
     print 'Configuring and building ICU into out/deps/icu'
     if flavor == 'win':
+      o['variables']['icu_src_stubdata'] = glob_to_var('deps', 'icu\\source\\stubdata')
+      o['variables']['icu_src_common'] = glob_to_var('deps', 'icu\\source\\common')
+      o['variables']['icu_src_i18n'] = glob_to_var('deps', 'icu\\source\\i18n')
       o['variables']['icu_gyp_path'] = 'deps/icu-generic-win.gyp'
     else:
       o['variables']['icu_gyp_path'] = 'deps/icu-generic.gyp'

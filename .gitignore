@@ -66,3 +66,7 @@ deps/zlib/zlib.target.mk
 
 /tools/wrk/wrk
 *.bat~
+*.gyp~
+configure~
+*.md~
+configure~
