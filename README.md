@@ -37,7 +37,7 @@ EXPERIMENTAL: alternate ICU support
 
 
    * Unixy systems only - uses shell script / makefile to build
-      * rewrite in python? require cygwin for windows?
+      * for windows, add `small-icu` or `full-icu` to vcbuild params. (WIP)
    * Builds a restricted ICU set
       * English and Root data only
       * Only the services needed by v8's Intl implementation
