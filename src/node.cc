@@ -3049,7 +3049,7 @@ static void ParseArgs(int* argc,
       new_v8_argv[new_v8_argc] = "--help";
       new_v8_argc += 1;
     } else if (strncmp(arg, "--icu-data-dir=", 15) == 0) {
-      icu_data_dir = arg+15;
+      icu_data_dir = arg + 15;
     } else {
       // V8 option.  Pass through as-is.
       new_v8_argv[new_v8_argc] = arg;
