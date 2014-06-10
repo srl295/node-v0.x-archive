@@ -47,18 +47,16 @@
           ],
         },
         'conditions': [
-          [
-            'icu_full=="false"', {
-              'link_settings': {
-                'libraries': [
-                  '-licusmdata',
-                ],
-                'library_dirs': [
-                  '<(PRODUCT_DIR)/deps/icu/stubdata',
-                ],
-              }
-            },
-          ]
+          [ 'icu_full=="false"', {
+            'link_settings': {
+              'libraries': [
+                '-licusmdata',
+              ],
+              'library_dirs': [
+                '<(PRODUCT_DIR)/deps/icu/stubdata',
+              ],
+            }
+          }, ]
         ],
       },
     },
