@@ -26,10 +26,6 @@
             'ExceptionHandling': '1',
           },
         },
-        'defines': [
-          'U_ATTRIBUTE_DEPRECATED=',
-          '_CRT_SECURE_NO_DEPRECATE=',
-        ],
         'configurations': {
           # TODO: why does this need to be redefined for Release?
           # Maybe this should be pushed into common.gypi with an "if v8 i18n"?
@@ -42,6 +38,10 @@
             },
           },
         },
+        'defines': [
+          'U_ATTRIBUTE_DEPRECATED=',
+          '_CRT_SECURE_NO_DEPRECATE=',
+        ],
       },
     },
     {
