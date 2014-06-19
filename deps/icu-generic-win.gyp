@@ -41,6 +41,7 @@
         'defines': [
           'U_ATTRIBUTE_DEPRECATED=',
           '_CRT_SECURE_NO_DEPRECATE=',
+	  'U_STATIC_IMPLEMENTATION=1',
         ],
       },
     },
@@ -62,14 +63,14 @@
       },
       'export_dependent_settings': ['icuuc'],
     },
+    # {
+    #   'target_name': 'icudata',
+    #   'type': 'none',
+    #   'dependencies': ['icustubdata'],
+    #   'export_dependent_settings': ['icustubdata'],
+    # },
     {
       'target_name': 'icudata',
-      'type': 'none',
-      'dependencies': ['icustubdata'],
-      'export_dependent_settings': ['icustubdata'],
-    },
-    {
-      'target_name': 'icustubdata',
       'type': '<(library)',
       'dependencies': ['icu_implementation'],
       'sources': [
@@ -78,6 +79,9 @@
       'include_dirs': [
         'icu/source/common',
       ],
+      'direct_dependent_settings': {
+        'libraries': [ '-licufxqw' ],
+      },
     },
     {
       'target_name': 'icuuc',
@@ -102,6 +106,14 @@
           'UCONFIG_NO_REGULAR_EXPRESSIONS=<(icu_UCONFIG_NO_REGULAR_EXPRESSIONS)',
           'UCONFIG_SRL_NO_TEST_API=<(icu_UCONFIG_SRL_NO_TEST_API)',
           'U_STATIC_IMPLEMENTATION=1',
+        ],
+        'conditions': [
+          [ 'host_arch=="x64"', {
+              'libraries': [ '-lAdvAPI64.Lib','-lUser64.lib' ],
+          }],
+          [ 'host_arch=="ia32"', {
+              'libraries': [ '-lAdvAPI32.Lib','-lUser32.lib' ],
+          }],
         ],
       },
       'export_dependent_settings': ['icudata'],
