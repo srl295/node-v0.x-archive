@@ -79,9 +79,9 @@
       'include_dirs': [
         'icu/source/common',
       ],
-      'direct_dependent_settings': {
-        'libraries': [ '-licufxqw' ],
-      },
+      # 'direct_dependent_settings': {
+      #   'libraries': [ '-licudata' ],
+      # },
     },
     {
       'target_name': 'icuuc',
@@ -109,10 +109,14 @@
         ],
         'conditions': [
           [ 'host_arch=="x64"', {
-              'libraries': [ '-lAdvAPI64.Lib','-lUser64.lib' ],
+            'link_settings': {
+              'libraries': [ '-lAdvAPI32.Lib','-lUser32.lib' ], # should be 64?
+            },
           }],
           [ 'host_arch=="ia32"', {
+            'link_settings': {
               'libraries': [ '-lAdvAPI32.Lib','-lUser32.lib' ],
+            },
           }],
         ],
       },
