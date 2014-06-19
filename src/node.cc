@@ -2933,11 +2933,11 @@ static void PrintHelp() {
          "  --v8-options         print v8 command line options\n"
          "  --max-stack-size=val set max v8 stack size (bytes)\n"
 #if defined(NODE_HAVE_I18N_SUPPORT)
-#if defined(NODE_HAVE_SMALL_ICU)
          "  --icu-data-dir=dir   set ICU data load path to dir\n"
          "                         (overrides NODE_ICU_DATA)\n"
-#else
-         "  --icu-data-dir=dir   This option is ignored for this build.\n"
+#if !defined(NODE_HAVE_SMALL_ICU)
+         "                       Note: linked-in ICU data is\n"
+         "                       present.\n"
 #endif
 #endif
          "\n"
@@ -2951,8 +2951,11 @@ static void PrintHelp() {
          "NODE_MODULE_CONTEXTS   Set to 1 to load modules in their own\n"
          "                       global contexts.\n"
          "NODE_DISABLE_COLORS    Set to 1 to disable colors in the REPL\n"
-#if defined(NODE_HAVE_I18N_SUPPORT) && defined(NODE_HAVE_SMALL_ICU)
+#if defined(NODE_HAVE_I18N_SUPPORT)
          "NODE_ICU_DATA          Data path for ICU (Intl object) data\n"
+#if !defined(NODE_HAVE_SMALL_ICU)
+	 "                       (will extend linked-in data)\n"
+#endif
          "\n"
 #endif
          "\n"
@@ -3400,7 +3403,7 @@ void Init(int* argc,
     }
   }
 
-#if defined(NODE_HAVE_I18N_SUPPORT) && defined(NODE_HAVE_SMALL_ICU)
+#if defined(NODE_HAVE_I18N_SUPPORT)
   if ( icu_data_dir == NULL ) {
     // if the parameter isn't given, use the env variable.
     icu_data_dir = getenv("NODE_ICU_DATA");
