@@ -34,8 +34,6 @@
       },
       'export_dependent_settings': ['icuuc'],
     },
-    ## TODO: need to add 'icudatan', 'icuucx', and other breakage
-    ## to deal with upstream v8 stuff. see icu-generic-win.gyp
     {
       'target_name': 'icudata',
       'type': 'none',
