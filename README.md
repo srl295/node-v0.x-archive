@@ -37,9 +37,8 @@ EXPERIMENTAL: alternate ICU support
 
 
    * Some rough edges on Windows.
-      * for windows, add `small-icu` or `full-icu` to vcbuild params. (WIP)
-      * As of this writing only `full-icu` will build, BUT will require
-      setting `NODE_ICU_DATA` or using `--icu-data-dir` to function. (WIP.)
+      * for windows, add `full-icu` to vcbuild params.
+      * (`small-icu` not working - WIP)
    * Builds a restricted ICU set
       * English and Root data only
       * Only the services needed by v8's Intl implementation

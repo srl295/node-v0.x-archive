@@ -68,16 +68,17 @@
     # TODO(srl295): for 'small ICU' depend on genccode, icupkg, and a cast of 1000s
     {
       'target_name': 'icudata',
-      'type': 'none',
+      'type': '<(library)',
       'dependencies': ['genccode'],
       'actions': [
         {
           'action_name': 'icudata',
           'inputs': [ 'icu/source/data/in/icudt53l.dat' ], # TODO: make a param obviously.
-          'outputs': [ '../out/icudata.obj' ], ## TODO fix
-          'action': [ 'genccode -o -d ../out/ -n icudata -e icudt53 <@(_inputs)' ],
+          'outputs': [ '../out/icudt53l_dat.obj' ], ## TODO fix
+          'action': [ '../Release/genccode -o -d ../out/ -n icudata -e icudt53 <@(_inputs)' ],
         },
       ],
+      'sources': [ '../out/icudt53l_dat.obj' ],
     },
     # this means "no data". It's a tiny (~1k) symbol with no ICU data in it.
     # tools must link against it as they are generating the full data.
