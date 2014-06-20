@@ -54,23 +54,35 @@
       'defines': [
         'U_I18N_IMPLEMENTATION=1',
       ],
-      'dependencies': ['icuuc', 'icu_implementation'],
+      'dependencies': ['icuucx', 'icu_implementation'],
       'direct_dependent_settings': {
         'include_dirs': [
           'icu/source/i18n',
           'deps/icu/i18n',
         ],
       },
-      'export_dependent_settings': ['icuuc'],
+      'export_dependent_settings': ['icuucx'],
     },
-    # {
-    #   'target_name': 'icudata',
-    #   'type': 'none',
-    #   'dependencies': ['icustubdata'],
-    #   'export_dependent_settings': ['icustubdata'],
-    # },
+    # TODO(srl295): for 'stub ICU' don't depend on genccode but depend on stubdata.
+    # TODO(srl295): for 'full ICU' depend on genccode AND full data
+    # TODO(srl295): for 'small ICU' depend on genccode, icupkg, and a cast of 1000s
     {
       'target_name': 'icudata',
+      'type': 'none',
+      'dependencies': ['genccode'],
+      'actions': [
+        {
+          'action_name': 'icudata',
+          'inputs': [ 'icu/source/data/in/icudt53l.dat' ], # TODO: make a param obviously.
+          'outputs': [ '../out/icudata.obj' ], ## TODO fix
+          'action': [ 'genccode -o -d ../out/ -n icudata -e icudt53 <@(_inputs)' ],
+        },
+      ],
+    },
+    # this means "no data". It's a tiny (~1k) symbol with no ICU data in it.
+    # tools must link against it as they are generating the full data.
+    {
+      'target_name': 'icustubdata',
       'type': '<(library)',
       'dependencies': ['icu_implementation'],
       'sources': [
@@ -79,14 +91,21 @@
       'include_dirs': [
         'icu/source/common',
       ],
-      # 'direct_dependent_settings': {
-      #   'libraries': [ '-licudata' ],
-      # },
     },
+    # this target is for d8 consumption.
+    # it is icuuc + stubdata
     {
       'target_name': 'icuuc',
+      'type': 'none',
+      'dependencies': ['icuucx', 'icudata' ],
+      'export_dependent_settings': ['icuucx', 'icudata' ],
+    },
+    # This is the 'real' icuuc.
+    # tools can depend on 'icuuc + stubdata'
+    {
+      'target_name': 'icuucx',
       'type': '<(library)',
-      'dependencies': ['icudata','icu_implementation'],
+      'dependencies': ['icu_implementation'],
       'sources': [
         '<@(icu_src_common)'
       ],
@@ -120,7 +139,54 @@
           }],
         ],
       },
-      'export_dependent_settings': ['icudata'],
+    },
+    {
+      'target_name': 'icutools',
+      'target-type': '<(library)',
+      'dependencies': ['icuucx','icui18n','icustubdata'],
+      'sources': [
+        '<@(icu_src_tools)'
+      ],
+      'defines': [
+        'U_TOOLUTIL_IMPLEMENTATION=1',
+      ],
+      'direct_dependent_settings': {
+        'include_dirs': [
+          'icu/source/tools/toolutil',
+          'deps/icu/toolutil',
+        ],
+      },
+      'export_dependent_settings': ['icuuc','icui18n','icustubdata'],
+    },
+    # TODO: may not need this, at least for full-icu.
+    # It is needed to rebuild .res files from .txt,
+    # or to build index (res_index.txt) files, though.
+    {
+      'target_name': 'genrb',
+      'target-type': 'executable',
+      'dependencies': ['icutools','icuucx','icui18n'],
+      'sources': [
+        '<@(icu_src_genrb)'
+      ],
+    },
+    # This is used to package, unpackage, repackage .dat files
+    # and convert endianesses
+    {
+      'target_name': 'icupkg',
+      'target-type': 'executable',
+      'dependencies': ['icutools','icuucx','icui18n'],
+      'sources': [
+        '<@(icu_src_icupkg)'
+      ],
+    },
+    # this is used to convert .dat directly into .obj. Do not pass go, do not collect US$200.
+    {
+      'target_name': 'genccode',
+      'target-type': 'executable',
+      'dependencies': ['icutools','icuucx','icui18n'],
+      'sources': [
+        '<@(icu_src_genccode)'
+      ],
     },
   ],
 }

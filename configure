@@ -683,7 +683,6 @@ configure_winsdk(output)
 def glob_to_var(dir_base, dir_sub):
   list = []
   dir_all = os.path.join(dir_base, dir_sub)
-  print "globbing %s + %s = %s" % (dir_base,dir_sub, dir_all)
   files = os.walk(dir_all)
   for ent in files:
     (path,dirs,files) = ent
@@ -694,7 +693,8 @@ def glob_to_var(dir_base, dir_sub):
   return list
 
 def configure_icu(o):
-  # todo(srl295): move this into a separate module if it is too long?
+  # todo(srl295): move this into a separate module if it is too big?
+  # todo(srl295): move the output into a separate config_icu.gypi?
   have_icu_path = bool(options.with_icu_path)
   have_generic_icu = bool(options.with_generic_icu)
   i18n_support = int(have_icu_path | have_generic_icu)
@@ -711,11 +711,34 @@ def configure_icu(o):
     o['variables']['icu_full'] = b(options.with_full_icu)
     o['variables']['icu_path'] = icu_full_path
     print 'Building from generic ICU in %s' % (options.with_generic_icu)
-    print 'Configuring and building ICU into out/deps/icu'
+    if not os.path.isdir(icu_full_path):
+      print 'Error: ICU path is not a directory: %s' % (icu_full_path)
+      sys.exit(1)
+    print 'Configuring and building ICU from %s into out/deps/icu' % (icu_full_path)
     if flavor == 'win':
+      # TODO srl295 - fixme!!! Should extract icu_ver from icu's uvernum.h and not hard-code it.
+      icu_ver_major='53'
+      o['variables']['icu_ver_major'] = icu_ver_major
+      # Note that we hardcode 'l' here for Little-Endian. This is the default prebuilt form.
+      icu_data_in=os.path.join(icu_full_path, 'source\\data\\in\\icudt%sl.dat' % (icu_ver_major))
+      if not os.path.isfile(icu_data_in):
+        # we need a generated .dat file.
+        # we're not about to build all of the specialized tools
+        # needed here.
+        print 'Error: ICU prebuilt data file %s does not exist. ' % (icu_data_in)
+        print 'Hint: a source download from http://icu-project.org/download'
+        print ' will contain this file, or a "normal" ICU build will'
+        print ' build it,'
+        print ' or you could generate one from http://apps.icu-project.org/datacustom'
+        sys.exit(1)
+      o['variables']['icu_data_in'] = icu_data_in
       o['variables']['icu_src_stubdata'] = glob_to_var('deps', 'icu\\source\\stubdata')
       o['variables']['icu_src_common'] = glob_to_var('deps', 'icu\\source\\common')
       o['variables']['icu_src_i18n'] = glob_to_var('deps', 'icu\\source\\i18n')
+      o['variables']['icu_src_tools'] = glob_to_var('deps', 'icu\\source\\tools\\toolutil')
+      o['variables']['icu_src_genrb'] = glob_to_var('deps', 'icu\\source\\tools\\genrb')
+      o['variables']['icu_src_icupkg'] = glob_to_var('deps', 'icu\\source\\tools\\icupkg')
+      o['variables']['icu_src_genccode'] = glob_to_var('deps', 'icu\\source\\tools\\genccode')
       o['variables']['icu_gyp_path'] = 'deps/icu-generic-win.gyp'
     else:
       o['variables']['icu_gyp_path'] = 'deps/icu-generic.gyp'
