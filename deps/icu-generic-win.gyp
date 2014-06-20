@@ -142,7 +142,7 @@
     },
     {
       'target_name': 'icutools',
-      'target-type': '<(library)',
+      'type': '<(library)',
       'dependencies': ['icuucx','icui18n','icustubdata'],
       'sources': [
         '<@(icu_src_tools)'
@@ -156,14 +156,14 @@
           'deps/icu/toolutil',
         ],
       },
-      'export_dependent_settings': ['icuuc','icui18n','icustubdata'],
+      'export_dependent_settings': ['icuucx','icui18n','icustubdata'],
     },
     # TODO: may not need this, at least for full-icu.
     # It is needed to rebuild .res files from .txt,
     # or to build index (res_index.txt) files, though.
     {
       'target_name': 'genrb',
-      'target-type': 'executable',
+      'type': 'executable',
       'dependencies': ['icutools','icuucx','icui18n'],
       'sources': [
         '<@(icu_src_genrb)'
@@ -173,7 +173,7 @@
     # and convert endianesses
     {
       'target_name': 'icupkg',
-      'target-type': 'executable',
+      'type': 'executable',
       'dependencies': ['icutools','icuucx','icui18n'],
       'sources': [
         '<@(icu_src_icupkg)'
@@ -182,7 +182,7 @@
     # this is used to convert .dat directly into .obj. Do not pass go, do not collect US$200.
     {
       'target_name': 'genccode',
-      'target-type': 'executable',
+      'type': 'executable',
       'dependencies': ['icutools','icuucx','icui18n'],
       'sources': [
         '<@(icu_src_genccode)'
