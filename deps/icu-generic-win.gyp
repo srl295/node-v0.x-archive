@@ -12,7 +12,10 @@
                  'icu_UCONFIG_NO_BREAK_ITERATION' : 0,
                  'icu_UCONFIG_NO_TRANSLITERATION' : 1,
                  'icu_UCONFIG_NO_REGULAR_EXPRESSIONS' : 1,
-                 'icu_UCONFIG_SRL_NO_TEST_API' : 1 
+                 'icu_UCONFIG_SRL_NO_TEST_API' : 1,
+
+                 # this is a singleton, not matchable by dir.
+                 'icu_src_derb': [ 'icu\\source\\tools\\genrb\\derb.c' ],
                },
   'targets': [
     {
@@ -63,22 +66,63 @@
       },
       'export_dependent_settings': ['icuucx'],
     },
+    # this is only built for derb..
+    {
+      'target_name': 'icuio',
+      'type': '<(library)',
+      'sources': [
+        '<@(icu_src_io)'
+      ],
+      'defines': [
+        'U_IO_IMPLEMENTATION=1',
+      ],
+      'dependencies': ['icuucx','icui18n','icu_implementation'],
+      'direct_dependent_settings': {
+        'include_dirs': [
+          'icu/source/io',
+          'deps/icu/io',
+        ],
+      },
+      'export_dependent_settings': ['icuucx','icui18n'],
+    },
     # TODO(srl295): for 'stub ICU' don't depend on genccode but depend on stubdata.
     # TODO(srl295): for 'full ICU' depend on genccode AND full data
     # TODO(srl295): for 'small ICU' depend on genccode, icupkg, and a cast of 1000s
     {
       'target_name': 'icudata',
       'type': '<(library)',
-      'dependencies': ['genccode'],
-      'actions': [
-        {
-          'action_name': 'icudata',
-          'inputs': [ 'icu/source/data/in/icudt53l.dat' ], # TODO: make a param obviously.
-          'outputs': [ '../out/icudt53l_dat.obj' ], ## TODO fix
-          'action': [ '../Release/genccode -o -d ../out/ -n icudata -e icudt53 <@(_inputs)' ],
-        },
+      'conditions': [
+        [ 'icu_full=="true"', {
+          # full data - just build the full data file, then we are done.
+          'sources': [ '../out/icudt53l_dat.obj' ],
+          'dependencies': ['genccode'],
+          'actions': [
+            {
+              'action_name': 'icudata',
+              'inputs': [ 'icu/source/data/in/icudt53l.dat' ], # TODO: make a param obviously.
+              'outputs': [ '../out/icudt53l_dat.obj' ], ## TODO fix
+              'action': [ '../Release/genccode -o -d ../out/ -n icudata -e icudt53 <@(_inputs)' ],
+            },
+          ],
+        }],
+        [ 'icu_full=="false"', {
+          # link against stub data primarily
+          # then, use icupkg and genccode to rebuild data
+          'dependencies': ['icustubdata', 'genccode','icupkg','genrb','derb','iculslocs'],
+          'export_dependent_settings': ['icustubdata'],
+          'actions': [
+            {
+              # FOR NOW - 'small' == 'full'.
+              'action_name': 'icudata',
+              'inputs': [ 'icu/source/data/in/icudt53l.dat' ], # TODO: make a param obviously.
+              'outputs': [ '../out/icudt53l_dat.obj' ], ## TODO fix
+              'action': [ '../Release/genccode -o -d ../out/ -n icudata -e icusmdt53 <@(_inputs)' ],
+            },
+          ],
+          # This file actually contains icuSM53l_dat - go figure.
+          'sources': [ '../out/icudt53l_dat.obj' ],
+        }],
       ],
-      'sources': [ '../out/icudt53l_dat.obj' ],
     },
     # this means "no data". It's a tiny (~1k) symbol with no ICU data in it.
     # tools must link against it as they are generating the full data.
@@ -168,6 +212,27 @@
       'dependencies': ['icutools','icuucx','icui18n'],
       'sources': [
         '<@(icu_src_genrb)'
+      ],
+      # derb is a separate executable and not built here.
+      'sources!': [
+        '<@(icu_src_derb)',
+      ],
+    },
+    {
+      'target_name': 'derb',
+      'type': 'executable',
+      'dependencies': ['icutools','icuucx','icui18n','icuio'],
+      'sources': [
+        '<@(icu_src_derb)',
+      ],
+    },
+    # experimental.
+    {
+      'target_name': 'iculslocs',
+      'type': 'executable',
+      'dependencies': ['icutools','icuucx','icui18n','icuio'],
+      'sources': [
+        'icu\\as_is\\iculslocs\\iculslocs.cpp',
       ],
     },
     # This is used to package, unpackage, repackage .dat files

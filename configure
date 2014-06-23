@@ -738,6 +738,7 @@ def configure_icu(o):
       o['variables']['icu_src_stubdata'] = glob_to_var('deps', 'icu\\source\\stubdata')
       o['variables']['icu_src_common'] = glob_to_var('deps', 'icu\\source\\common')
       o['variables']['icu_src_i18n'] = glob_to_var('deps', 'icu\\source\\i18n')
+      o['variables']['icu_src_io'] = glob_to_var('deps', 'icu\\source\\io')
       o['variables']['icu_src_tools'] = glob_to_var('deps', 'icu\\source\\tools\\toolutil')
       o['variables']['icu_src_genrb'] = glob_to_var('deps', 'icu\\source\\tools\\genrb')
       o['variables']['icu_src_icupkg'] = glob_to_var('deps', 'icu\\source\\tools\\icupkg')
