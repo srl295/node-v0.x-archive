@@ -59,7 +59,7 @@
 #define SMALL_DEF(major, suff) icusmdt##suff##major##_dat
 #endif
 
-extern "C" const char U_IMPORT SMALL_ICUDATA_ENTRY_POINT[];
+extern "C" const char U_DATA_API SMALL_ICUDATA_ENTRY_POINT[];
 #endif
 
 
