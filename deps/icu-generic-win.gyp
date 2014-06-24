@@ -112,9 +112,16 @@
           'export_dependent_settings': ['icustubdata'],
           'actions': [
             {
-              # FOR NOW - 'small' == 'full'.
-              'action_name': 'icudata',
+              # trim down ICU
+              'action_name': 'icutrim',
               'inputs': [ 'icu/source/data/in/icudt53l.dat' ], # TODO: make a param obviously.
+              'outputs': [ '../out/icutmp/icudt53l.dat' ], ## TODO fix
+              'action': [ 'icu/as_is/iculslocs/icutrim.py -P ../Release -D <@(_inputs) --delete-tmp -T ../out/icutmp -F icu/as_is/iculslocs/trim_en.json -O icudt53l.dat -v' ],
+            },
+            {
+              # build final .dat -> .obj
+              'action_name': 'genccode',
+              'inputs': [ '../out/icutmp/icudt53l.dat' ], # TODO: make a param obviously.
               'outputs': [ '../out/icudt53l_dat.obj' ], ## TODO fix
               'action': [ '../Release/genccode -o -d ../out/ -n icudata -e icusmdt53 <@(_inputs)' ],
             },
