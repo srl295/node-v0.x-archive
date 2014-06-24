@@ -36,9 +36,12 @@ EXPERIMENTAL: alternate ICU support
     make install
 
 
-   * Some rough edges on Windows.
-      * for windows, add `full-icu` to vcbuild params.
-      * (`small-icu` not working - WIP)
+   * Windows instructions:
+      * add `full-icu` or `small-icu` to vcbuild params.
+      * also, you will need to get `icudt53l.dat`:
+      	* download ICU 53 source (.zip) from http://site.icu-project.org/download
+	* copy `icu/source/data/in/icudt53l.dat` from the source zip 
+	   to `deps/icu/source/data/in/icudt53l.dat`
    * Builds a restricted ICU set
       * English and Root data only
       * Only the services needed by v8's Intl implementation
