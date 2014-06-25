@@ -690,7 +690,7 @@ def glob_to_var(dir_base, dir_sub):
   for ent in files:
     (path,dirs,files) = ent
     for file in files:
-      if file.endswith(".cpp") or file.endswith(".c") or file.endswith(".h"):
+      if file.endswith('.cpp') or file.endswith('.c') or file.endswith('.h'):
         list.append(os.path.join(dir_sub, file))
     break
   return list
@@ -701,6 +701,7 @@ def configure_icu(o):
   have_icu_path = bool(options.with_icu_path)
   have_generic_icu = bool(options.with_generic_icu)
   i18n_support = int(have_icu_path | have_generic_icu)
+  byteorder = sys.byteorder
   if (have_icu_path and have_generic_icu):
     print 'Error: Cannot specify both --with-icu-path and --with-generic-icu'
     sys.exit(1)
@@ -718,23 +719,55 @@ def configure_icu(o):
       print 'Error: ICU path is not a directory: %s' % (icu_full_path)
       sys.exit(1)
     print 'Configuring and building ICU from %s into out/deps/icu' % (icu_full_path)
+    uvernum_h = os.path.join(icu_full_path,'source','common','unicode','uvernum.h')
+    if not os.path.isfile(uvernum_h):
+      print 'Error: could not load %s - is ICU installed?' % uvernum_h
+      sys.exit(1)
+    icu_ver_major = None
+    match_version = re.compile("""^\s*#define\s+U_ICU_VERSION_SHORT\s+"([^"]*)".*""")
+    for line in open(uvernum_h).readlines():
+      m = match_version.match(line)
+      if m:
+        icu_ver_major = m.group(1)
+    if not icu_ver_major:
+      print 'Could not read U_ICU_VERSION_SHORT version from %s' % uvernum_h
+      sys.exit(1)
+    icu_endianness = None
+    if sys.byteorder == 'little':
+      icu_endianness = 'l'
+    elif sys.byteorder == 'big':
+      icu_endianness = 'b'
+    else:
+      print 'Unknown endianness %s' % sys.byteorder
+    print 'ICU major version %s, endianness %s' % (icu_ver_major, icu_endianness)
+    o['variables']['icu_ver_major'] = icu_ver_major
+    o['variables']['icu_endianness'] = icu_endianness
+    icu_data_file_l = 'icudt%s%s.dat' % (icu_ver_major, 'l')
+    icu_data_file = 'icudt%s%s.dat' % (icu_ver_major, icu_endianness)
+    # relative to configure
+    icu_data_path=os.path.join(icu_full_path, 'source','data','in',icu_data_file_l)
+    # relative to dep..
+    icu_data_in=os.path.join('icu', 'source','data','in',icu_data_file_l)
+    if not os.path.isfile(icu_data_path) and icu_endianness != 'l':
+      # use host endianness
+      icu_data_path=os.path.join(icu_full_path, 'source','data','in',icu_data_file)
+      # relative to dep..
+      icu_data_in=os.path.join('icu', 'source','data','in',icu_data_file)
+    if not os.path.isfile(icu_data_path):
+        print "Warning: ICU input data file %s does not exist (failure on Windows)" % icu_data_in
+    o['variables']['icu_data_in'] = icu_data_in
+    o['variables']['icu_data_file'] = icu_data_file
     if flavor == 'win':
-      # TODO srl295 - fixme!!! Should extract icu_ver from icu's uvernum.h and not hard-code it.
-      icu_ver_major='53'
-      o['variables']['icu_ver_major'] = icu_ver_major
-      # Note that we hardcode 'l' here for Little-Endian. This is the default prebuilt form.
-      icu_data_in=os.path.join(icu_full_path, 'source\\data\\in\\icudt%sl.dat' % (icu_ver_major))
-      if not os.path.isfile(icu_data_in):
+      if not os.path.isfile(icu_data_path):
         # we need a generated .dat file.
         # we're not about to build all of the specialized tools
         # needed here.
-        print 'Error: ICU prebuilt data file %s does not exist. ' % (icu_data_in)
+        print 'Error: ICU prebuilt data file %s does not exist. ' % (icu_data_path)
         print 'Hint: a source download from http://icu-project.org/download'
         print ' will contain this file, or a "normal" ICU build will'
         print ' build it,'
         print ' or you could generate one from http://apps.icu-project.org/datacustom'
         sys.exit(1)
-      o['variables']['icu_data_in'] = icu_data_in
       o['variables']['icu_src_stubdata'] = glob_to_var('deps', 'icu\\source\\stubdata')
       o['variables']['icu_src_common'] = glob_to_var('deps', 'icu\\source\\common')
       o['variables']['icu_src_i18n'] = glob_to_var('deps', 'icu\\source\\i18n')

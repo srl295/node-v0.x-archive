@@ -1,5 +1,5 @@
 # Copyright (c) IBM Corporation and Others. All Rights Reserved.
-# based on icu.gyp from Chromium
+# very loosely based on icu.gyp from Chromium
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -30,9 +30,17 @@
           },
         },
         'configurations': {
-          # TODO: why does this need to be redefined for Release?
+          # TODO: why does this need to be redefined for Release and Debug?
           # Maybe this should be pushed into common.gypi with an "if v8 i18n"?
           'Release': {
+            'msvs_settings': {
+              'VCCLCompilerTool': {
+                'RuntimeTypeInfo': 'true',
+                'ExceptionHandling': '1',
+              },
+            },
+          },
+          'Debug': {
             'msvs_settings': {
               'VCCLCompilerTool': {
                 'RuntimeTypeInfo': 'true',
@@ -85,49 +93,47 @@
       },
       'export_dependent_settings': ['icuucx','icui18n'],
     },
-    # TODO(srl295): for 'stub ICU' don't depend on genccode but depend on stubdata.
-    # TODO(srl295): for 'full ICU' depend on genccode AND full data
-    # TODO(srl295): for 'small ICU' depend on genccode, icupkg, and a cast of 1000s
+    # This exports actual ICU data
     {
       'target_name': 'icudata',
       'type': '<(library)',
       'conditions': [
         [ 'icu_full=="true"', {
           # full data - just build the full data file, then we are done.
-          'sources': [ '../out/icudt53l_dat.obj' ],
+          'sources': [ '../out/icudt<(icu_ver_major)<(icu_endianness)_dat.obj' ],
           'dependencies': ['genccode'],
           'actions': [
             {
               'action_name': 'icudata',
-              'inputs': [ 'icu/source/data/in/icudt53l.dat' ], # TODO: make a param obviously.
-              'outputs': [ '../out/icudt53l_dat.obj' ], ## TODO fix
-              'action': [ '../Release/genccode -o -d ../out/ -n icudata -e icudt53 <@(_inputs)' ],
+              'inputs': [ '<(icu_data_in)' ],
+              'outputs': [ '../out/icudt<(icu_ver_major)<(icu_endianness)_dat.obj' ],
+              'action': [ '../<(CONFIGURATION_NAME)/genccode -o -d ../out/ -n icudata -e icudt<(icu_ver_major) <@(_inputs)' ],
             },
           ],
         }],
         [ 'icu_full=="false"', {
           # link against stub data primarily
           # then, use icupkg and genccode to rebuild data
-          'dependencies': ['icustubdata', 'genccode','icupkg','genrb','derb','iculslocs'],
+          'dependencies': ['icustubdata', 'genccode','icupkg','genrb','iculslocs'],
           'export_dependent_settings': ['icustubdata'],
           'actions': [
             {
               # trim down ICU
               'action_name': 'icutrim',
-              'inputs': [ 'icu/source/data/in/icudt53l.dat' ], # TODO: make a param obviously.
-              'outputs': [ '../out/icutmp/icudt53l.dat' ], ## TODO fix
-              'action': [ 'icu/as_is/iculslocs/icutrim.py -P ../Release -D <@(_inputs) --delete-tmp -T ../out/icutmp -F icu/as_is/iculslocs/trim_en.json -O icudt53l.dat -v' ],
+              'inputs': [ '<(icu_data_in)', 'icu_data_in' ],
+              'outputs': [ '../out/icutmp/icudt<(icu_ver_major)<(icu_endianness).dat' ],
+              'action': [ 'icu/as_is/iculslocs/icutrim.py -P ../<(CONFIGURATION_NAME) -D <(icu_data_in) --delete-tmp -T ../out/icutmp -F icu_small.json -O icudt<(icu_ver_major)<(icu_endianness).dat -v' ],
             },
             {
               # build final .dat -> .obj
               'action_name': 'genccode',
-              'inputs': [ '../out/icutmp/icudt53l.dat' ], # TODO: make a param obviously.
-              'outputs': [ '../out/icudt53l_dat.obj' ], ## TODO fix
-              'action': [ '../Release/genccode -o -d ../out/ -n icudata -e icusmdt53 <@(_inputs)' ],
+              'inputs': [ '../out/icutmp/icudt<(icu_ver_major)<(icu_endianness).dat' ],
+              'outputs': [ '../out/icudt<(icu_ver_major)<(icu_endianness)_dat.obj' ],
+              'action': [ '../<(CONFIGURATION_NAME)/genccode -o -d ../out/ -n icudata -e icusmdt<(icu_ver_major) <@(_inputs)' ],
             },
           ],
-          # This file actually contains icuSM53l_dat - go figure.
-          'sources': [ '../out/icudt53l_dat.obj' ],
+          # This file actually contains the small ICU data - go figure.
+          'sources': [ '../out/icudt<(icu_ver_major)<(icu_endianness)_dat.obj' ],
         }],
       ],
     },
@@ -210,9 +216,8 @@
       },
       'export_dependent_settings': ['icuucx','icui18n','icustubdata'],
     },
-    # TODO: may not need this, at least for full-icu.
-    # It is needed to rebuild .res files from .txt,
-    # or to build index (res_index.txt) files, though.
+    # This is needed to rebuild .res files from .txt,
+    # or to build index (res_index.txt) files for small-icu
     {
       'target_name': 'genrb',
       'type': 'executable',
@@ -220,19 +225,19 @@
       'sources': [
         '<@(icu_src_genrb)'
       ],
-      # derb is a separate executable and not built here.
+      # derb is a separate executable
       'sources!': [
         '<@(icu_src_derb)',
       ],
     },
-    {
-      'target_name': 'derb',
-      'type': 'executable',
-      'dependencies': ['icutools','icuucx','icui18n','icuio'],
-      'sources': [
-        '<@(icu_src_derb)',
-      ],
-    },
+    # {
+    #   'target_name': 'derb',
+    #   'type': 'executable',
+    #   'dependencies': ['icutools','icuucx','icui18n','icuio'],
+    #   'sources': [
+    #     '<@(icu_src_derb)',
+    #   ],
+    # },
     # experimental.
     {
       'target_name': 'iculslocs',
@@ -252,7 +257,7 @@
         '<@(icu_src_icupkg)'
       ],
     },
-    # this is used to convert .dat directly into .obj. Do not pass go, do not collect US$200.
+    # this is used to convert .dat directly into .obj
     {
       'target_name': 'genccode',
       'type': 'executable',
