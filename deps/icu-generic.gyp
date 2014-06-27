@@ -15,6 +15,7 @@
   ],
   'targets': [
     {
+      'toolsets': [ 'host','target' ],
       'target_name': 'icui18n',
       'type': 'none',
       'dependencies': ['icuuc'],
@@ -36,6 +37,7 @@
     },
     {
       'target_name': 'icudata',
+      'toolsets': [ 'host','target' ],
       'type': 'none',
       'direct_dependent_settings': {
         'link_settings': {
@@ -62,6 +64,7 @@
     },
     {
       'target_name': 'icuuc',
+      'toolsets': [ 'host','target' ],
       'type': 'none',
       'dependencies': ['icudata'],
       'direct_dependent_settings': {
