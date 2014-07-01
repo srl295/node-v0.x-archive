@@ -753,40 +753,27 @@ def configure_icu(o):
       icu_data_path=os.path.join(icu_full_path, 'source','data','in',icu_data_file)
       # relative to dep..
       icu_data_in=os.path.join('icu', 'source','data','in',icu_data_file)
-    if not os.path.isfile(icu_data_path):
-        print "Warning: ICU input data file %s does not exist (failure on Windows)" % icu_data_in
     o['variables']['icu_data_in'] = icu_data_in
     o['variables']['icu_data_file'] = icu_data_file
-    if flavor == 'win':
-      if not os.path.isfile(icu_data_path):
-        # we need a generated .dat file.
-        # we're not about to build all of the specialized tools
-        # needed here.
-        print 'Error: ICU prebuilt data file %s does not exist. ' % (icu_data_path)
-        print 'Hint: a source download from http://icu-project.org/download'
-        print ' will contain this file, or a "normal" ICU build will'
-        print ' build it,'
-        print ' or you could generate one from http://apps.icu-project.org/datacustom'
-        sys.exit(1)
-      o['variables']['icu_src_stubdata'] = glob_to_var('deps', 'icu\\source\\stubdata')
-      o['variables']['icu_src_common'] = glob_to_var('deps', 'icu\\source\\common')
-      o['variables']['icu_src_i18n'] = glob_to_var('deps', 'icu\\source\\i18n')
-      o['variables']['icu_src_io'] = glob_to_var('deps', 'icu\\source\\io')
-      o['variables']['icu_src_tools'] = glob_to_var('deps', 'icu\\source\\tools\\toolutil')
-      o['variables']['icu_src_genrb'] = glob_to_var('deps', 'icu\\source\\tools\\genrb')
-      o['variables']['icu_src_icupkg'] = glob_to_var('deps', 'icu\\source\\tools\\icupkg')
-      o['variables']['icu_src_genccode'] = glob_to_var('deps', 'icu\\source\\tools\\genccode')
-      o['variables']['icu_gyp_path'] = 'deps/icu-generic-win.gyp'
-    else:
-      o['variables']['icu_gyp_path'] = 'deps/icu-generic.gyp'
-      cmd_str = 'deps/icu-generic.sh "%s" "%s/out/%s/deps/icu" "%s"'
-      cmd = cmd_str % ( icu_full_path, root_dir, default_config, with_full_icu )
-      print 'Configuring ICU for %s:' % flavor
-      print '# %s' % (cmd)
-      if (os.system(cmd)!=0):
-        print 'ICU build failed.'
-        sys.exit(1)
-      print 'ICU built.'
+    if not os.path.isfile(icu_data_path):
+      # we need a generated .dat file.
+      # we're not about to build all of the specialized tools
+      # needed here.
+      print 'Error: ICU prebuilt data file %s does not exist. ' % (icu_data_path)
+      print 'Hint: a source download from http://icu-project.org/download'
+      print ' will contain this file, or a "normal" ICU build will'
+      print ' build it,'
+      print ' or you could generate one from http://apps.icu-project.org/datacustom'
+      sys.exit(1)
+    o['variables']['icu_src_stubdata'] = glob_to_var('deps', 'icu/source/stubdata')
+    o['variables']['icu_src_common'] = glob_to_var('deps', 'icu/source/common')
+    o['variables']['icu_src_i18n'] = glob_to_var('deps', 'icu/source/i18n')
+    o['variables']['icu_src_io'] = glob_to_var('deps', 'icu/source/io')
+    o['variables']['icu_src_tools'] = glob_to_var('deps', 'icu/source/tools/toolutil')
+    o['variables']['icu_src_genrb'] = glob_to_var('deps', 'icu/source/tools/genrb')
+    o['variables']['icu_src_icupkg'] = glob_to_var('deps', 'icu/source/tools/icupkg')
+    o['variables']['icu_src_genccode'] = glob_to_var('deps', 'icu/source/tools/genccode')
+    o['variables']['icu_gyp_path'] = 'deps/icu-generic.gyp'
 
 configure_icu(output)
 
