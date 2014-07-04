@@ -6,15 +6,16 @@
 
 
 {
-  # hard-coded for now. move to config.gypi?
   'variables': {
-                 'icu_src_derb': [ 'icu/source/tools/genrb/derb.c' ],
-               },
+    'icu_src_derb': [ 'icu/source/tools/genrb/derb.c' ],
+  },
   'targets': [
     {
-      # a target to hold uconfig defines
+      # a target to hold uconfig defines.
+      # for now these are hard coded, but could be defined.
       'target_name': 'icu_uconfig',
       'type': 'none',
+      'toolsets': [ 'host','target' ],
       'direct_dependent_settings': {
         'defines': [
           'UCONFIG_NO_LEGACY_CONVERSION=1',
@@ -32,7 +33,8 @@
       }
     },
     {
-      # a target to hold common settings
+      # a target to hold common settings.
+      # make any target that is ICU implementation depend on this.
       'target_name': 'icu_implementation',
       'toolsets': [ 'host','target' ],
       'type': 'none',
@@ -211,7 +213,6 @@
           'sources': [ '../out/icudt<(icu_ver_major)<(icu_endianness)_dat.obj' ],
         }],
         [ 'icu_full == "false" and OS != "win"', {
-_NOTWORKING
           # link against stub data primarily
           # then, use icupkg and genccode to rebuild data
           'dependencies': ['icustubdata', 'genccode','icupkg','genrb','iculslocs'],
@@ -278,6 +279,7 @@ _NOTWORKING
       'target_name': 'icuucx',
       'type': '<(library)',
       'dependencies': ['icu_implementation','icu_uconfig'],
+      'toolsets': [ 'host','target' ],
       'sources': [
         '<@(icu_src_common)'
       ],
