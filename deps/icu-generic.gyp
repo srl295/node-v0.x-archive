@@ -203,29 +203,30 @@
                 # HUGE TODO - use .s or .o not .c ..
 
                 # TODO: needed for endianness swap
-                # {
-                #   'action_name': 'icupkg',
-                #   'inputs': [ '<(icu_data_in)' ],
-                #   'outputs': [ '<(SHARED_INTERMEDIATE_DIR)/icudt<(icu_ver_major).dat' ],
-                #   'action': [ 'cp', #'<(PRODUCT_DIR)/icupkg',
-                #               #'-t<(icu_endianness)',
-                #               '<@(_inputs)',
-                #               '<@(_outputs)',
-                #             ],
-                # },
+                {
+                   'action_name': 'icupkg',
+                   'inputs': [ '<(icu_data_in)' ],
+                   'outputs':[ '<(SHARED_INTERMEDIATE_DIR)/icudt<(icu_ver_major).dat' ],
+                   'action': [ 'cp', #'<(PRODUCT_DIR)/icupkg',
+                               #'-t<(icu_endianness)',
+                               '<@(_inputs)',
+                               '<@(_outputs)',
+                             ], #TODO: actually swap.
+                },
                 {
                   'action_name': 'icudata',
-                  'inputs': [ '<(icu_data_in)' ],
-                  'outputs': [ '<(SHARED_INTERMEDIATE_DIR)/icudt<(icu_ver_major)_dat.c' ],
+                  'inputs': [ '<(SHARED_INTERMEDIATE_DIR)/icudt<(icu_ver_major).dat' ],
+                  'outputs':[ '<(SHARED_INTERMEDIATE_DIR)/icudt<(icu_ver_major)_dat.c' ],
                   'action': [ '<(PRODUCT_DIR)/genccode',
+                              '-e','icudt<(icu_ver_major)',
                               '-d','<(SHARED_INTERMEDIATE_DIR)',
                               '-f','icudt<(icu_ver_major)_dat',
                               '<@(_inputs)' ],
                 },
               ], # end actions
             }, { # icu_full == false ( and OS != win )
-              # link against stub data primarily
-              # then, use icupkg and genccode to rebuild data
+              # link against stub data (as primary data)
+              # then, use icupkg and genccode to rebuild small data
               'dependencies': ['icustubdata', 'genccode','icupkg','genrb','iculslocs'],
               'export_dependent_settings': ['icustubdata'],
               'actions': [
@@ -245,18 +246,18 @@
                 }, {
                   # build final .dat -> .obj
                   'action_name': 'genccode',
-                  'inputs': [ '../out/icutmp/icudt<(icu_ver_major)<(icu_endianness).dat' ],
-                  'outputs': [ '../out/icudt<(icu_ver_major)<(icu_endianness)_dat.obj' ],
-                  'action': [ '../<(CONFIGURATION_NAME)/genccode',
-                              '-o',
-                              '-d', '../out/',
-                              '-n','icudata',
+                  'inputs': [ '<(SHARED_INTERMEDIATE_DIR)/icutmp/icudt<(icu_ver_major)<(icu_endianness).dat' ],
+                  'outputs': [ '<(SHARED_INTERMEDIATE_DIR)/icusmdt<(icu_ver_major)_dat.c' ],
+                  'action': [ '<(PRODUCT_DIR)/genccode',
+                              '-d', '<(SHARED_INTERMEDIATE_DIR)',
+                              '-n','icusmdt<(icu_ver_major)',
                               '-e','icusmdt<(icu_ver_major)',
+                              '-f','icusmdt<(icu_ver_major)_dat',
                               '<@(_inputs)' ],
                 },
               ],
-              # This file actually contains the small ICU data
-              'sources': [ '../out/icudt<(icu_ver_major)<(icu_endianness)_dat.obj' ],
+              # This file contains the small ICU data
+              'sources': [ '<(SHARED_INTERMEDIATE_DIR)/icusmdt<(icu_ver_major)_dat.c' ],
             }]], # end icu_full
         }]], # end OS != win
     }, # end icudata
