@@ -165,7 +165,8 @@
                   'action_name': 'icutrim',
                   'inputs': [ '<(icu_data_in)', 'icu-trim/icu_small.json' ],
                   'outputs': [ '../out/icutmp/icudt<(icu_ver_major)<(icu_endianness).dat' ],
-                  'action': [ 'icu-trim/icutrim.py',
+                  'action': [ 'python',
+                              'icu-trim/icutrim.py',
                               '-P', '../<(CONFIGURATION_NAME)',
                               '-D', '<(icu_data_in)',
                               '--delete-tmp',
@@ -200,9 +201,6 @@
                 'icu/source/common',
               ],
               'actions': [
-                # HUGE TODO - use .s or .o not .c ..
-
-                # TODO: needed for endianness swap
                 {
                    'action_name': 'icupkg',
                    'inputs': [ '<(icu_data_in)' ],
@@ -227,7 +225,8 @@
             }, { # icu_full == false ( and OS != win )
               # link against stub data (as primary data)
               # then, use icupkg and genccode to rebuild small data
-              'dependencies': ['icustubdata', 'genccode','icupkg','genrb','iculslocs'],
+              'dependencies': ['icustubdata', 'genccode','icupkg','genrb','iculslocs',
+                               'icu_implementation', 'icu_uconfig'],
               'export_dependent_settings': ['icustubdata'],
               'actions': [
                 {
@@ -235,7 +234,8 @@
                   'action_name': 'icutrim',
                   'inputs': [ '<(icu_data_in)', 'icu-trim/icu_small.json' ],
                   'outputs': [ '<(SHARED_INTERMEDIATE_DIR)/icutmp/icudt<(icu_ver_major)<(icu_endianness).dat' ],
-                  'action': [ 'icu-trim/icutrim.py',
+                  'action': [ 'python',
+                              'icu-trim/icutrim.py',
                               '-P', '<(PRODUCT_DIR)',
                               '-D', '<(icu_data_in)',
                               '--delete-tmp',
@@ -244,20 +244,30 @@
                               '-O', 'icudt<(icu_ver_major)<(icu_endianness).dat',
                               '-v' ],
                 }, {
+                  # rename to get the final entrypoint name righ
+                   'action_name': 'rename',
+                   'inputs': [ '<(SHARED_INTERMEDIATE_DIR)/icutmp/icudt<(icu_ver_major)<(icu_endianness).dat' ],
+                   'outputs': [ '<(SHARED_INTERMEDIATE_DIR)/icutmp/icusmdt<(icu_ver_major).dat' ],
+                   'action': [ 'cp',
+                               '<@(_inputs)',
+                               '<@(_outputs)',
+                             ],
+                }, {
                   # build final .dat -> .obj
                   'action_name': 'genccode',
-                  'inputs': [ '<(SHARED_INTERMEDIATE_DIR)/icutmp/icudt<(icu_ver_major)<(icu_endianness).dat' ],
+                  'inputs': [ '<(SHARED_INTERMEDIATE_DIR)/icutmp/icusmdt<(icu_ver_major).dat' ],
                   'outputs': [ '<(SHARED_INTERMEDIATE_DIR)/icusmdt<(icu_ver_major)_dat.c' ],
                   'action': [ '<(PRODUCT_DIR)/genccode',
                               '-d', '<(SHARED_INTERMEDIATE_DIR)',
-                              '-n','icusmdt<(icu_ver_major)',
-                              '-e','icusmdt<(icu_ver_major)',
-                              '-f','icusmdt<(icu_ver_major)_dat',
                               '<@(_inputs)' ],
                 },
               ],
               # This file contains the small ICU data
               'sources': [ '<(SHARED_INTERMEDIATE_DIR)/icusmdt<(icu_ver_major)_dat.c' ],
+              # for umachine.h
+              'include_dirs': [
+                'icu/source/common',
+              ],
             }]], # end icu_full
         }]], # end OS != win
     }, # end icudata
@@ -329,6 +339,7 @@
       ],
       'defines': [
         'U_TOOLUTIL_IMPLEMENTATION=1',
+        #'DEBUG=0', # http://bugs.icu-project.org/trac/ticket/10977
       ],
       'direct_dependent_settings': {
         'include_dirs': [

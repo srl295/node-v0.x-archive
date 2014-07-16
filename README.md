@@ -16,7 +16,7 @@ Unix/Macintosh:
     make
     make install
 
-With ICU i18n support
+With minimal ICU i18n support
 ( Chromium's ICU: older rev, missing some locales?, larger output size )
 
     svn checkout --force --revision 214189 \
@@ -28,45 +28,38 @@ With ICU i18n support
 
 EXPERIMENTAL: alternate ICU support
 
-    svn checkout --force \
-     http://source.icu-project.org/repos/icu/icu/branches/srl/10919config53 \
-     deps/icu
-    ./configure --with-generic-icu=deps/icu
-    make
-    make install
-
-
+    * Getting ICU -  http://site.icu-project.org/download
+      * download ICU 53+ source (.tgz or .zip)
+      * unpack as node/deps/icu/...
+   * General instructions
+      * `./configure --with-generic-icu=deps/icu --with-full-icu`
+      * If you want English only (the mall build), drop the `--with-full-icu`
    * Windows instructions:
-      * add `full-icu` or `small-icu` to vcbuild params.
-      * also, you will need to get `icudt53l.dat`:
-      	* download ICU 53 source (.zip) from http://site.icu-project.org/download
-	* copy `icu/source/data/in/icudt53l.dat` from the source zip 
-	   to `deps/icu/source/data/in/icudt53l.dat`
-   * Builds a restricted ICU set
-      * English and Root data only
-      * Only the services needed by v8's Intl implementation
-   * Specify an additional icu data file with either:
-      * The `NODE_ICU_DATA` env variable:   `env NODE_ICU_DATA=/some/path node`
-      * The `--icu-data-dir` parameter:   `node --icu-data-dir=/some/path`
-   * Example:  If you use the path `/some/path`, then ICU 53 on Little
-     Endian (l) finds:
-      * individual files such as `/some/path/icudt53l/root.res`
-      * a packaged data file `/some/path/icudt53l.dat`
-   * Notes:
-      * See `u_setDataDirectory()` and
+      * Add `full-icu` (everything) or `small-icu` (English only) to
+        vcbuild params.
+   * If you didn't build with full ICU, you can provide additional
+     data at runtime.
+      * Two methods:
+        * The `NODE_ICU_DATA` env variable:   `env
+          NODE_ICU_DATA=/some/path node`
+        * The `--icu-data-dir` parameter:   `node
+          --icu-data-dir=/some/path`
+      * Example:  If you use the path `/some/path`, then ICU 53 on
+        Little Endian (l) finds:
+        * individual files such as `/some/path/icudt53l/root.res`
+        * a packaged data file `/some/path/icudt53l.dat`
+      * Notes:
+        * See `u_setDataDirectory()` and
         [the ICU Users Guide](http://userguide.icu-project.org/icudata)
         for many more details.
-      * "53l" will be "53b" on a big endian machine.
-      * To get a "full" icudt53*.dat, goto http://site.icu-project.org/download
-          * for icudt53l.dat: it is present in the ICU source .tgz
-          * for icudt53b.dat: download source and build ICU
-      * the additional configure option `--with-full-icu` will also
-        build a full ICU, this causes the env var and param mentioned
-        above to become no-ops.
+        * "53l" will be "53b" on a big endian machine.
    * TODO:
-      * instead of svn checkout, allow using a 'stock' ICU from
-        http://site.icu-project.org/download with larger output
-      * switch to build 'all data' by default.
+     * Allow use of the 'system' ICU
+   * Note:
+     * Debug mode may fail with stock ICU 53. See
+       http://bugs.icu-project.org/trac/ticket/10977
+       and/or apply change
+       http://bugs.icu-project.org/trac/changeset/35947
 
 
 If your python binary is in a non-standard location or has a

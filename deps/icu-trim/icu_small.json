@@ -12,7 +12,6 @@
       ]
     },
     "leavealone": {
-
     }
   },
   "trees": {
@@ -40,6 +39,9 @@
     "unames.icu"
   ],
   "keep": [
-    "pool.res"
+    "pool.res",
+    "supplementalData.res",
+    "zoneinfo64.res",
+    "likelySubtags.res"
   ]
 }
