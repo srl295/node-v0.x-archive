@@ -691,7 +691,7 @@ def glob_to_var(dir_base, dir_sub):
     (path,dirs,files) = ent
     for file in files:
       if file.endswith('.cpp') or file.endswith('.c') or file.endswith('.h'):
-        list.append(os.path.join(dir_sub, file))
+        list.append("%s/%s" % (dir_sub, file))
     break
   return list
 
