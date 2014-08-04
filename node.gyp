@@ -420,6 +420,7 @@
         'src/node_main.cc',
         'src/node_os.cc',
         'src/node_v8.cc',
+        'src/node_i18n.cc',
         'src/node_stat_watcher.cc',
         'src/node_watchdog.cc',
         'src/node_zlib.cc',
@@ -435,6 +436,7 @@
         'src/process_wrap.cc',
         'src/udp_wrap.cc',
         'src/uv.cc',
+        'src/util.cc',
         # headers to make for a more pleasant IDE experience
         'src/async-wrap.h',
         'src/async-wrap-inl.h',
@@ -448,6 +450,7 @@
         'src/node_constants.h',
         'src/node_contextify.h',
         'src/node_file.h',
+        'src/node_base.h',
         'src/node_http_parser.h',
         'src/node_internals.h',
         'src/node_javascript.h',
