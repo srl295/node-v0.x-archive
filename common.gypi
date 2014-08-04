@@ -1,16 +1,19 @@
 {
   'variables': {
-    'werror': '',                    # Turn off -Werror in V8 build.
-    'visibility%': 'hidden',         # V8's visibility setting
-    'target_arch%': 'ia32',          # set v8's target architecture
-    'host_arch%': 'ia32',            # set v8's host architecture
-    'want_separate_host_toolset': 0, # V8 should not build target and host
-    'library%': 'static_library',    # allow override to 'shared_library' for DLL/.so builds
-    'component%': 'static_library',  # NB. these names match with what V8 expects
-    'msvs_multi_core_compile': '0',  # we do enable multicore compiles, but not using the V8 way
+    'werror': '',                     # Turn off -Werror in V8 build.
+    'visibility%': 'hidden',          # V8's visibility setting
+    'target_arch%': 'ia32',           # set v8's target architecture
+    'host_arch%': 'ia32',             # set v8's host architecture
+    'want_separate_host_toolset%': 0, # V8 should not build target and host
+    'library%': 'static_library',     # allow override to 'shared_library' for DLL/.so builds
+    'component%': 'static_library',   # NB. these names match with what V8 expects
+    'msvs_multi_core_compile': '0',   # we do enable multicore compiles, but not using the V8 way
     'gcc_version%': 'unknown',
     'clang%': 0,
     'python%': 'python',
+
+    # Enable disassembler for `--print-code` v8 options
+    'v8_enable_disassembler': 1,
 
     # Enable V8's post-mortem debugging only on unix flavors.
     'conditions': [
@@ -21,7 +24,7 @@
         'os_posix': 1,
         'v8_postmortem_support': 'true'
       }],
-      ['GENERATOR == "ninja"', {
+      ['GENERATOR == "ninja" or OS== "mac"', {
         'OBJ_DIR': '<(PRODUCT_DIR)/obj',
         'V8_BASE': '<(PRODUCT_DIR)/libv8_base.<(target_arch).a',
       }, {
@@ -35,6 +38,9 @@
     'default_configuration': 'Release',
     'configurations': {
       'Debug': {
+        'variables': {
+          'v8_enable_handle_zapping%': 1,
+        },
         'defines': [ 'DEBUG', '_DEBUG' ],
         'cflags': [ '-g', '-O0' ],
         'conditions': [
@@ -63,6 +69,9 @@
         },
       },
       'Release': {
+        'variables': {
+          'v8_enable_handle_zapping%': 0,
+        },
         'cflags': [ '-O3', '-ffunction-sections', '-fdata-sections' ],
         'conditions': [
           ['target_arch=="x64"', {

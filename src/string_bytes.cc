@@ -300,6 +300,7 @@ size_t StringBytes::Write(Isolate* isolate,
   const char* data = NULL;
   size_t len = 0;
   bool is_extern = GetExternalParts(isolate, val, &data, &len);
+  size_t extlen = len;
 
   CHECK(val->IsString() == true);
   Local<String> str = val.As<String>();
@@ -325,9 +326,11 @@ size_t StringBytes::Write(Isolate* isolate,
 
     case UTF8:
       if (is_extern)
+        // TODO(tjfontaine) should this validate invalid surrogate pairs as
+        // well?
         memcpy(buf, data, len);
       else
-        len = str->WriteUtf8(buf, buflen, chars_written, flags);
+        len = str->WriteUtf8(buf, buflen, chars_written, WRITE_UTF8_FLAGS);
       break;
 
     case UCS2:
@@ -340,8 +343,8 @@ size_t StringBytes::Write(Isolate* isolate,
         // the Buffer, so we need to reorder on BE platforms.  See
         // http://nodejs.org/api/buffer.html regarding Node's "ucs2"
         // encoding specification
-        uint16_t *buf16 = reinterpret_cast<uint16_t*>(buf);
-        for (size_t i=0; i < len; i++) {
+        uint16_t* buf16 = reinterpret_cast<uint16_t*>(buf);
+        for (size_t i = 0; i < len; i++) {
           buf16[i] = (buf16[i] << 8) | (buf16[i] >> 8);
         }
       }
@@ -352,7 +355,7 @@ size_t StringBytes::Write(Isolate* isolate,
 
     case BASE64:
       if (is_extern) {
-        base64_decode(buf, buflen, data, len);
+        len = base64_decode(buf, buflen, data, extlen);
       } else {
         String::Value value(str);
         len = base64_decode(buf, buflen, *value, value.length());
@@ -364,7 +367,7 @@ size_t StringBytes::Write(Isolate* isolate,
 
     case HEX:
       if (is_extern) {
-        hex_decode(buf, buflen, data, len);
+        len = hex_decode(buf, buflen, data, extlen);
       } else {
         String::Value value(str);
         len = hex_decode(buf, buflen, *value, value.length());
@@ -524,7 +527,7 @@ static bool contains_non_ascii(const char* src, size_t len) {
   }
 
 
-#if defined(__x86_64__) || defined(_WIN64) || defined(__PPC64__) || \
+#if defined(__x86_64__) || defined(_WIN64) || defined(__PPC64__) ||           \
     defined(_ARCH_PPC64)
   const uintptr_t mask = 0x8080808080808080ll;
 #else
@@ -580,7 +583,7 @@ static void force_ascii(const char* src, char* dst, size_t len) {
     }
   }
 
-#if defined(__x86_64__) || defined(_WIN64) || defined(__PPC64__) || \
+#if defined(__x86_64__) || defined(_WIN64) || defined(__PPC64__) ||           \
     defined(_ARCH_PPC64)
   const uintptr_t mask = ~0x8080808080808080ll;
 #else
@@ -756,7 +759,7 @@ Local<Value> StringBytes::Encode(Isolate* isolate,
         // http://nodejs.org/api/buffer.html regarding Node's "ucs2"
         // encoding specification
         dst = new uint16_t[buflen / 2];
-        for (size_t i=0; i < buflen/2; i++) {
+        for (size_t i = 0; i < buflen / 2; i++) {
           dst[i] = (out[i] << 8) | (out[i] >> 8);
         }
         out = dst;

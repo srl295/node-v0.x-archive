@@ -35,6 +35,8 @@
 #include "node_crypto.h"
 #endif
 
+#include "node_i18n.h"
+
 #if defined HAVE_DTRACE || defined HAVE_ETW
 #include "node_dtrace.h"
 #endif
@@ -47,6 +49,7 @@
 #include "handle_wrap.h"
 #include "req_wrap.h"
 #include "string_bytes.h"
+#include "util.h"
 #include "uv.h"
 #include "v8-debug.h"
 #include "v8-profiler.h"
@@ -134,6 +137,9 @@ static node_module* modpending;
 static node_module* modlist_builtin;
 static node_module* modlist_addon;
 
+// Path to ICU data (for i18n / Intl)
+static const char* icu_data_dir = NULL;
+
 // used by C++ modules as well
 bool no_deprecation = false;
 
@@ -144,6 +150,8 @@ static uv_async_t dispatch_debug_messages_async;
 
 static Isolate* node_isolate = NULL;
 
+int WRITE_UTF8_FLAGS = v8::String::HINT_MANY_WRITES_EXPECTED |
+                       v8::String::NO_NULL_TERMINATION;
 
 class ArrayBufferAllocator : public ArrayBuffer::Allocator {
  public:
@@ -1256,7 +1264,7 @@ enum encoding ParseEncoding(Isolate* isolate,
   if (!encoding_v->IsString())
     return _default;
 
-  String::Utf8Value encoding(encoding_v);
+  node::Utf8Value encoding(encoding_v);
 
   if (strcasecmp(*encoding, "utf8") == 0) {
     return UTF8;
@@ -1356,11 +1364,11 @@ void AppendExceptionLine(Environment* env,
   static char arrow[1024];
 
   // Print (filename):(line number): (message).
-  String::Utf8Value filename(message->GetScriptResourceName());
+  node::Utf8Value filename(message->GetScriptResourceName());
   const char* filename_string = *filename;
   int linenum = message->GetLineNumber();
   // Print line of source code.
-  String::Utf8Value sourceline(message->GetSourceLine());
+  node::Utf8Value sourceline(message->GetSourceLine());
   const char* sourceline_string = *sourceline;
 
   // Because of how node modules work, all scripts are wrapped with a
@@ -1397,14 +1405,22 @@ void AppendExceptionLine(Environment* env,
 
   // Print wavy underline (GetUnderline is deprecated).
   for (int i = 0; i < start; i++) {
+    if (sourceline_string[i] == '\0' ||
+        static_cast<size_t>(off) >= sizeof(arrow)) {
+      break;
+    }
     assert(static_cast<size_t>(off) < sizeof(arrow));
     arrow[off++] = (sourceline_string[i] == '\t') ? '\t' : ' ';
   }
   for (int i = start; i < end; i++) {
+    if (sourceline_string[i] == '\0' ||
+        static_cast<size_t>(off) >= sizeof(arrow)) {
+      break;
+    }
     assert(static_cast<size_t>(off) < sizeof(arrow));
     arrow[off++] = '^';
   }
-  assert(static_cast<size_t>(off) < sizeof(arrow) - 1);
+  assert(static_cast<size_t>(off - 1) <= sizeof(arrow) - 1);
   arrow[off++] = '\n';
   arrow[off] = '\0';
 
@@ -1451,7 +1467,7 @@ static void ReportException(Environment* env,
   else
     trace_value = er->ToObject()->Get(env->stack_string());
 
-  String::Utf8Value trace(trace_value);
+  node::Utf8Value trace(trace_value);
 
   // range errors have a trace member set to undefined
   if (trace.length() > 0 && !trace_value->IsUndefined()) {
@@ -1474,11 +1490,11 @@ static void ReportException(Environment* env,
         name.IsEmpty() ||
         name->IsUndefined()) {
       // Not an error object. Just print as-is.
-      String::Utf8Value message(er);
+      node::Utf8Value message(er);
       fprintf(stderr, "%s\n", *message);
     } else {
-      String::Utf8Value name_string(name);
-      String::Utf8Value message_string(message);
+      node::Utf8Value name_string(name);
+      node::Utf8Value message_string(message);
       fprintf(stderr, "%s: %s\n", *name_string, *message_string);
     }
   }
@@ -1527,7 +1543,7 @@ static void GetActiveRequests(const FunctionCallbackInfo<Value>& args) {
   int i = 0;
 
   QUEUE_FOREACH(q, &req_wrap_queue) {
-    ReqWrap<uv_req_t>* w = CONTAINER_OF(q, ReqWrap<uv_req_t>, req_wrap_queue_);
+    ReqWrap<uv_req_t>* w = ContainerOf(&ReqWrap<uv_req_t>::req_wrap_queue_, q);
     if (w->persistent().IsEmpty())
       continue;
     ary->Set(i++, w->object());
@@ -1550,7 +1566,7 @@ void GetActiveHandles(const FunctionCallbackInfo<Value>& args) {
   Local<String> owner_sym = env->owner_string();
 
   QUEUE_FOREACH(q, &handle_wrap_queue) {
-    HandleWrap* w = CONTAINER_OF(q, HandleWrap, handle_wrap_queue_);
+    HandleWrap* w = ContainerOf(&HandleWrap::handle_wrap_queue_, q);
     if (w->persistent().IsEmpty() || (w->flags_ & HandleWrap::kUnref))
       continue;
     Local<Object> object = w->object();
@@ -1578,7 +1594,7 @@ static void Chdir(const FunctionCallbackInfo<Value>& args) {
     return env->ThrowError("Bad argument.");
   }
 
-  String::Utf8Value path(args[0]);
+  node::Utf8Value path(args[0]);
   int err = uv_chdir(*path);
   if (err) {
     return env->ThrowUVException(err, "uv_chdir");
@@ -1626,10 +1642,10 @@ static void Umask(const FunctionCallbackInfo<Value>& args) {
       oct = args[0]->Uint32Value();
     } else {
       oct = 0;
-      String::Utf8Value str(args[0]);
+      node::Utf8Value str(args[0]);
 
       // Parse the octal string.
-      for (int i = 0; i < str.length(); i++) {
+      for (size_t i = 0; i < str.length(); i++) {
         char c = (*str)[i];
         if (c > '7' || c < '0') {
           return env->ThrowTypeError("invalid octal string");
@@ -1731,7 +1747,7 @@ static uid_t uid_by_name(Handle<Value> value) {
   if (value->IsUint32()) {
     return static_cast<uid_t>(value->Uint32Value());
   } else {
-    String::Utf8Value name(value);
+    node::Utf8Value name(value);
     return uid_by_name(*name);
   }
 }
@@ -1741,7 +1757,7 @@ static gid_t gid_by_name(Handle<Value> value) {
   if (value->IsUint32()) {
     return static_cast<gid_t>(value->Uint32Value());
   } else {
-    String::Utf8Value name(value);
+    node::Utf8Value name(value);
     return gid_by_name(*name);
   }
 }
@@ -1882,7 +1898,7 @@ static void InitGroups(const FunctionCallbackInfo<Value>& args) {
     return env->ThrowTypeError("argument 2 must be a number or a string");
   }
 
-  String::Utf8Value arg0(args[0]);
+  node::Utf8Value arg0(args[0]);
   gid_t extra_group;
   bool must_free;
   char* user;
@@ -2058,7 +2074,7 @@ void DLOpen(const FunctionCallbackInfo<Value>& args) {
   }
 
   Local<Object> module = args[0]->ToObject();  // Cast
-  String::Utf8Value filename(args[1]);  // Cast
+  node::Utf8Value filename(args[1]);  // Cast
 
   Local<String> exports_string = env->exports_string();
   Local<Object> exports = module->Get(exports_string)->ToObject();
@@ -2195,7 +2211,7 @@ static void Binding(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args.GetIsolate());
 
   Local<String> module = args[0]->ToString();
-  String::Utf8Value module_v(module);
+  node::Utf8Value module_v(module);
 
   Local<Object> cache = env->binding_cache_object();
   Local<Object> exports;
@@ -2255,7 +2271,7 @@ static void ProcessTitleSetter(Local<String> property,
                                const PropertyCallbackInfo<void>& info) {
   Environment* env = Environment::GetCurrent(info.GetIsolate());
   HandleScope scope(env->isolate());
-  String::Utf8Value title(value);
+  node::Utf8Value title(value);
   // TODO(piscisaureus): protect with a lock
   uv_set_process_title(*title);
 }
@@ -2266,7 +2282,7 @@ static void EnvGetter(Local<String> property,
   Environment* env = Environment::GetCurrent(info.GetIsolate());
   HandleScope scope(env->isolate());
 #ifdef __POSIX__
-  String::Utf8Value key(property);
+  node::Utf8Value key(property);
   const char* val = getenv(*key);
   if (val) {
     return info.GetReturnValue().Set(String::NewFromUtf8(env->isolate(), val));
@@ -2299,8 +2315,8 @@ static void EnvSetter(Local<String> property,
   Environment* env = Environment::GetCurrent(info.GetIsolate());
   HandleScope scope(env->isolate());
 #ifdef __POSIX__
-  String::Utf8Value key(property);
-  String::Utf8Value val(value);
+  node::Utf8Value key(property);
+  node::Utf8Value val(value);
   setenv(*key, *val, 1);
 #else  // _WIN32
   String::Value key(property);
@@ -2322,7 +2338,7 @@ static void EnvQuery(Local<String> property,
   HandleScope scope(env->isolate());
   int32_t rc = -1;  // Not found unless proven otherwise.
 #ifdef __POSIX__
-  String::Utf8Value key(property);
+  node::Utf8Value key(property);
   if (getenv(*key))
     rc = 0;
 #else  // _WIN32
@@ -2350,7 +2366,7 @@ static void EnvDeleter(Local<String> property,
   HandleScope scope(env->isolate());
   bool rc = true;
 #ifdef __POSIX__
-  String::Utf8Value key(property);
+  node::Utf8Value key(property);
   rc = getenv(*key) != NULL;
   if (rc)
     unsetenv(*key);
@@ -2785,14 +2801,6 @@ void SetupProcessObject(Environment* env,
   NODE_SET_METHOD(process, "_setupNextTick", SetupNextTick);
   NODE_SET_METHOD(process, "_setupDomainUse", SetupDomainUse);
 
-  // values use to cross communicate with processNextTick
-  Local<Object> tick_info_obj = Object::New(env->isolate());
-  tick_info_obj->SetIndexedPropertiesToExternalArrayData(
-      env->tick_info()->fields(),
-      kExternalUnsignedIntArray,
-      env->tick_info()->fields_count());
-  process->Set(env->tick_info_string(), tick_info_obj);
-
   // pre-set _events object for faster emit checks
   process->Set(env->events_string(), Object::New(env->isolate()));
 }
@@ -2823,7 +2831,7 @@ static void RawDebug(const FunctionCallbackInfo<Value>& args) {
   assert(args.Length() == 1 && args[0]->IsString() &&
          "must be called with a single string");
 
-  String::Utf8Value message(args[0]);
+  node::Utf8Value message(args[0]);
   fprintf(stderr, "%s\n", *message);
   fflush(stderr);
 }
@@ -2934,8 +2942,19 @@ static void PrintHelp() {
          "  -i, --interactive    always enter the REPL even if stdin\n"
          "                       does not appear to be a terminal\n"
          "  --no-deprecation     silence deprecation warnings\n"
+         "  --throw-deprecation  throw an exception anytime a deprecated "
+         "function is used\n"
          "  --trace-deprecation  show stack traces on deprecations\n"
          "  --v8-options         print v8 command line options\n"
+         "  --max-stack-size=val set max v8 stack size (bytes)\n"
+#if defined(NODE_HAVE_I18N_SUPPORT)
+         "  --icu-data-dir=dir   set ICU data load path to dir\n"
+         "                         (overrides NODE_ICU_DATA)\n"
+#if !defined(NODE_HAVE_SMALL_ICU)
+         "                       Note: linked-in ICU data is\n"
+         "                       present.\n"
+#endif
+#endif
          "\n"
          "Environment variables:\n"
 #ifdef _WIN32
@@ -2947,6 +2966,13 @@ static void PrintHelp() {
          "NODE_MODULE_CONTEXTS   Set to 1 to load modules in their own\n"
          "                       global contexts.\n"
          "NODE_DISABLE_COLORS    Set to 1 to disable colors in the REPL\n"
+#if defined(NODE_HAVE_I18N_SUPPORT)
+         "NODE_ICU_DATA          Data path for ICU (Intl object) data\n"
+#if !defined(NODE_HAVE_SMALL_ICU)
+         "                       (will extend linked-in data)\n"
+#endif
+         "\n"
+#endif
          "\n"
          "Documentation can be found at http://nodejs.org/\n");
 }
@@ -3037,6 +3063,8 @@ static void ParseArgs(int* argc,
     } else if (strcmp(arg, "--v8-options") == 0) {
       new_v8_argv[new_v8_argc] = "--help";
       new_v8_argc += 1;
+    } else if (strncmp(arg, "--icu-data-dir=", 15) == 0) {
+      icu_data_dir = arg + 15;
     } else {
       // V8 option.  Pass through as-is.
       new_v8_argv[new_v8_argc] = arg;
@@ -3095,6 +3123,9 @@ static void EnableDebug(Isolate* isolate, bool wait_connect) {
   Environment* env = Environment::GetCurrentChecked(isolate);
   if (env == NULL)
     return;  // Still starting up.
+
+  // Assign environment to the debugger's context
+  env->AssignToContext(v8::Debug::GetDebugContext());
 
   Context::Scope context_scope(env->context());
   Local<Object> message = Object::New(env->isolate());
@@ -3387,6 +3418,17 @@ void Init(int* argc,
     }
   }
 
+  if (icu_data_dir == NULL) {
+    // if the parameter isn't given, use the env variable.
+    icu_data_dir = getenv("NODE_ICU_DATA");
+  }
+  // Initialize ICU.
+  // If icu_data_dir is NULL here, it will load the 'minimal' data.
+  if ( !node::i18n::InitializeICUDirectory(icu_data_dir) ) {
+    FatalError(NULL, "Could not initialize ICU "
+                "(check NODE_ICU_DATA or --icu-data-dir parameters)");
+  }
+
   // The const_cast doesn't violate conceptual const-ness.  V8 doesn't modify
   // the argv array or the elements it points to.
   V8::SetFlagsFromCommandLine(&v8_argc, const_cast<char**>(v8_argv), true);
@@ -3522,13 +3564,13 @@ int EmitExit(Environment* env) {
 
 
 Environment* CreateEnvironment(Isolate* isolate,
+                               Handle<Context> context,
                                int argc,
                                const char* const* argv,
                                int exec_argc,
                                const char* const* exec_argv) {
   HandleScope handle_scope(isolate);
 
-  Local<Context> context = Context::New(isolate);
   Context::Scope context_scope(context);
   Environment* env = Environment::New(context);
 
@@ -3569,6 +3611,11 @@ Environment* CreateEnvironment(Isolate* isolate,
 
 
 int Start(int argc, char** argv) {
+  const char* replaceInvalid = getenv("NODE_INVALID_UTF8");
+
+  if (replaceInvalid == NULL)
+    WRITE_UTF8_FLAGS |= String::REPLACE_INVALID_UTF8;
+
 #if !defined(_WIN32)
   // Try hard not to lose SIGUSR1 signals during the bootstrap process.
   InstallEarlyDebugSignalHandler();
@@ -3595,8 +3642,15 @@ int Start(int argc, char** argv) {
   V8::Initialize();
   {
     Locker locker(node_isolate);
-    Environment* env =
-        CreateEnvironment(node_isolate, argc, argv, exec_argc, exec_argv);
+    HandleScope handle_scope(node_isolate);
+    Local<Context> context = Context::New(node_isolate);
+    Environment* env = CreateEnvironment(
+        node_isolate, context, argc, argv, exec_argc, exec_argv);
+    // Assign env to the debugger's context
+    if (debugger_running) {
+      HandleScope scope(env->isolate());
+      env->AssignToContext(v8::Debug::GetDebugContext());
+    }
     // This Context::Scope is here so EnableDebug() can look up the current
     // environment with Environment::GetCurrentChecked().
     // TODO(bnoordhuis) Reorder the debugger initialization logic so it can
@@ -3623,10 +3677,10 @@ int Start(int argc, char** argv) {
     env = NULL;
   }
 
-#ifndef NDEBUG
-  // Clean up. Not strictly necessary.
+  CHECK_NE(node_isolate, NULL);
+  node_isolate->Dispose();
+  node_isolate = NULL;
   V8::Dispose();
-#endif  // NDEBUG
 
   delete[] exec_argv;
   exec_argv = NULL;

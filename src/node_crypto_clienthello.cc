@@ -85,41 +85,52 @@ bool ClientHelloParser::ParseRecordHeader(const uint8_t* data, size_t avail) {
   return true;
 }
 
+#ifdef OPENSSL_NO_SSL2
+# define NODE_SSL2_VER_CHECK(buf) false
+#else
+# define NODE_SSL2_VER_CHECK(buf) ((buf)[0] == 0x00 && (buf)[1] == 0x02)
+#endif  // OPENSSL_NO_SSL2
+
 
 void ClientHelloParser::ParseHeader(const uint8_t* data, size_t avail) {
+  ClientHello hello;
+
   // >= 5 + frame size bytes for frame parsing
   if (body_offset_ + frame_len_ > avail)
     return;
 
   // Skip unsupported frames and gather some data from frame
+  // Check hello protocol version
+  if (!(data[body_offset_ + 4] == 0x03 && data[body_offset_ + 5] <= 0x03) &&
+      !NODE_SSL2_VER_CHECK(data + body_offset_ + 4)) {
+    goto fail;
+  }
 
-  // TODO(indutny): Check hello protocol version
   if (data[body_offset_] == kClientHello) {
     if (state_ == kTLSHeader) {
       if (!ParseTLSClientHello(data, avail))
-        return End();
+        goto fail;
     } else if (state_ == kSSL2Header) {
 #ifdef OPENSSL_NO_SSL2
       if (!ParseSSL2ClientHello(data, avail))
-        return End();
+        goto fail;
 #else
       abort();  // Unreachable
 #endif  // OPENSSL_NO_SSL2
     } else {
       // We couldn't get here, but whatever
-      return End();
+      goto fail;
     }
 
     // Check if we overflowed (do not reply with any private data)
     if (session_id_ == NULL ||
         session_size_ > 32 ||
         session_id_ + session_size_ > data + avail) {
-      return End();
+      goto fail;
     }
   }
 
   state_ = kPaused;
-  ClientHello hello;
   hello.session_id_ = session_id_;
   hello.session_size_ = session_size_;
   hello.has_ticket_ = tls_ticket_ != NULL && tls_ticket_size_ != 0;
@@ -127,7 +138,14 @@ void ClientHelloParser::ParseHeader(const uint8_t* data, size_t avail) {
   hello.servername_ = servername_;
   hello.servername_size_ = static_cast<uint8_t>(servername_size_);
   onhello_cb_(cb_arg_, hello);
+  return;
+
+ fail:
+  return End();
 }
+
+
+#undef NODE_SSL2_VER_CHECK
 
 
 void ClientHelloParser::ParseExtension(ClientHelloParser::ExtensionType type,

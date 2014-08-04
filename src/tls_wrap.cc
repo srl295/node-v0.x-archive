@@ -53,12 +53,6 @@ using v8::Object;
 using v8::String;
 using v8::Value;
 
-static const int X509_NAME_FLAGS = ASN1_STRFLGS_ESC_CTRL
-                                 | ASN1_STRFLGS_ESC_MSB
-                                 | XN_FLAG_SEP_MULTILINE
-                                 | XN_FLAG_FN_SN;
-
-
 size_t TLSCallbacks::error_off_;
 char TLSCallbacks::error_buf_[1024];
 
@@ -120,7 +114,7 @@ TLSCallbacks::~TLSCallbacks() {
     QUEUE* q = QUEUE_HEAD(&pending_write_items_);
     QUEUE_REMOVE(q);
 
-    WriteItem* wi = QUEUE_DATA(q, WriteItem, member_);
+    WriteItem* wi = ContainerOf(&WriteItem::member_, q);
     delete wi;
   }
 }
@@ -147,11 +141,14 @@ bool TLSCallbacks::InvokeQueued(int status) {
     return false;
 
   // Process old queue
-  while (!QUEUE_EMPTY(&pending_write_items_)) {
-    QUEUE* q = QUEUE_HEAD(&pending_write_items_);
+  QUEUE queue;
+  QUEUE* q = QUEUE_HEAD(&pending_write_items_);
+  QUEUE_SPLIT(&pending_write_items_, q, &queue);
+  while (QUEUE_EMPTY(&queue) == false) {
+    q = QUEUE_HEAD(&queue);
     QUEUE_REMOVE(q);
 
-    WriteItem* wi = QUEUE_DATA(q, WriteItem, member_);
+    WriteItem* wi = ContainerOf(&WriteItem::member_, q);
     wi->cb_(&wi->w_->req_, status);
     delete wi;
   }
@@ -186,7 +183,6 @@ void TLSCallbacks::InitSSL() {
 #ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
   if (is_server()) {
     SSL_CTX_set_tlsext_servername_callback(sc_->ctx_, SelectSNIContextCallback);
-    SSL_CTX_set_tlsext_servername_arg(sc_->ctx_, this);
   }
 #endif  // SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
 
@@ -477,6 +473,11 @@ void TLSCallbacks::ClearOut() {
     Local<Value> arg = GetSSLError(read, &err, NULL);
 
     if (!arg.IsEmpty()) {
+      // When TLS Alert are stored in wbio,
+      // it should be flushed to socket before destroyed.
+      if (BIO_pending(enc_out_) != 0)
+        EncOut();
+
       MakeCallback(env()->onerror_string(), 1, &arg);
     }
   }
@@ -542,8 +543,6 @@ int TLSCallbacks::DoWrite(WriteWrap* w,
                           uv_write_cb cb) {
   assert(send_handle == NULL);
 
-  // Queue callback to execute it on next tick
-  WriteItem* wi = new WriteItem(w, cb);
   bool empty = true;
 
   // Empty writes should not go through encryption process
@@ -561,6 +560,8 @@ int TLSCallbacks::DoWrite(WriteWrap* w,
       return uv_write(&w->req_, wrap()->stream(), bufs, count, cb);
   }
 
+  // Queue callback to execute it on next tick
+  WriteItem* wi = new WriteItem(w, cb);
   QUEUE_INSERT_TAIL(&write_item_queue_, &wi->member_);
 
   // Write queued data
@@ -763,14 +764,14 @@ void TLSCallbacks::SetServername(const FunctionCallbackInfo<Value>& args) {
     return;
 
 #ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
-  String::Utf8Value servername(args[0].As<String>());
+  node::Utf8Value servername(args[0].As<String>());
   SSL_set_tlsext_host_name(wrap->ssl_, *servername);
 #endif  // SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
 }
 
 
 int TLSCallbacks::SelectSNIContextCallback(SSL* s, int* ad, void* arg) {
-  TLSCallbacks* p = static_cast<TLSCallbacks*>(arg);
+  TLSCallbacks* p = static_cast<TLSCallbacks*>(SSL_get_app_data(s));
   Environment* env = p->env();
 
   const char* servername = SSL_get_servername(s, TLSEXT_NAMETYPE_host_name);

@@ -23,18 +23,12 @@
 #define SRC_UTIL_H_
 
 #include "v8.h"
+
 #include <assert.h>
 #include <stddef.h>
 #include <stdlib.h>
 
 namespace node {
-
-#define OFFSET_OF(TypeName, Field)                                            \
-  (reinterpret_cast<uintptr_t>(&(reinterpret_cast<TypeName*>(8)->Field)) - 8)
-
-#define CONTAINER_OF(Pointer, TypeName, Field)                                \
-  reinterpret_cast<TypeName*>(                                                \
-      reinterpret_cast<uintptr_t>(Pointer) - OFFSET_OF(TypeName, Field))
 
 #define FIXED_ONE_BYTE_STRING(isolate, string)                                \
   (node::OneByteString((isolate), (string), sizeof(string) - 1))
@@ -62,6 +56,23 @@ namespace node {
 #define CHECK_NE(a, b) CHECK((a) != (b))
 
 #define UNREACHABLE() abort()
+
+// The helper is for doing safe downcasts from base types to derived types.
+template <typename Inner, typename Outer>
+class ContainerOfHelper {
+ public:
+  inline ContainerOfHelper(Inner Outer::*field, Inner* pointer);
+  template <typename TypeName>
+  inline operator TypeName*() const;
+ private:
+  Outer* const pointer_;
+};
+
+// Calculate the address of the outer (i.e. embedding) struct from
+// the interior pointer to a data member.
+template <typename Inner, typename Outer>
+inline ContainerOfHelper<Inner, Outer> ContainerOf(Inner Outer::*field,
+                                                   Inner* pointer);
 
 // If persistent.IsWeak() == false, then do not call persistent.Reset()
 // while the returned Local<T> is still in scope, it will destroy the
@@ -103,6 +114,31 @@ inline void Wrap(v8::Local<v8::Object> object, void* pointer);
 
 template <typename TypeName>
 inline TypeName* Unwrap(v8::Local<v8::Object> object);
+
+class Utf8Value {
+  public:
+    explicit Utf8Value(v8::Handle<v8::Value> value);
+
+    ~Utf8Value() {
+      free(str_);
+    }
+
+    char* operator*() {
+      return str_;
+    };
+
+    const char* operator*() const {
+      return str_;
+    };
+
+    size_t length() const {
+      return length_;
+    };
+
+  private:
+    size_t length_;
+    char* str_;
+};
 
 }  // namespace node
 

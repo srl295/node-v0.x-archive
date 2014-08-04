@@ -35,6 +35,14 @@ FakeInput.prototype.pause = function() {};
 FakeInput.prototype.write = function() {};
 FakeInput.prototype.end = function() {};
 
+function isWarned(emitter) {
+  for (var name in emitter) {
+    var listeners = emitter[name];
+    if (listeners.warned) return true;
+  }
+  return false;
+}
+
 [ true, false ].forEach(function(terminal) {
   var fi;
   var rli;
@@ -206,6 +214,31 @@ FakeInput.prototype.end = function() {};
   assert.equal(callCount, 1);
   rli.close();
 
+  // keypress
+  [
+    ['a'],
+    ['\x1b'],
+    ['\x1b[31m'],
+    ['\x1b[31m', '\x1b[39m'],
+    ['\x1b[31m', 'a', '\x1b[39m', 'a']
+  ].forEach(function (keypresses) {
+    fi = new FakeInput();
+    callCount = 0;
+    var remainingKeypresses = keypresses.slice();
+    function keypressListener (ch, key) {
+      callCount++;
+      if (ch) assert(!key.code);
+      assert.equal(key.sequence, remainingKeypresses.shift());
+    };
+    readline.emitKeypressEvents(fi);
+    fi.on('keypress', keypressListener);
+    fi.emit('data', keypresses.join(''));
+    assert.equal(callCount, keypresses.length);
+    assert.equal(remainingKeypresses.length, 0);
+    fi.removeListener('keypress', keypressListener);
+    fi.emit('data', ''); // removes listener
+  });
+
   if (terminal) {
     // question
     fi = new FakeInput();
@@ -262,4 +295,17 @@ FakeInput.prototype.end = function() {};
   assert.equal(readline.getStringWidth('> '), 2);
 
   assert.deepEqual(fi.listeners(terminal ? 'keypress' : 'data'), []);
+
+  // check EventEmitter memory leak
+  for (var i=0; i<12; i++) {
+    var rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+    rl.close();
+    assert.equal(isWarned(process.stdin._events), false);
+    assert.equal(isWarned(process.stdout._events), false);
+  }
+
 });
+

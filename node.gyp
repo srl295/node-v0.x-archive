@@ -106,6 +106,7 @@
         'src/node_stat_watcher.cc',
         'src/node_watchdog.cc',
         'src/node_zlib.cc',
+        'src/node_i18n.cc',
         'src/pipe_wrap.cc',
         'src/signal_wrap.cc',
         'src/smalloc.cc',
@@ -129,7 +130,6 @@
         'src/node.h',
         'src/node_buffer.h',
         'src/node_constants.h',
-        'src/node_contextify.h',
         'src/node_file.h',
         'src/node_http_parser.h',
         'src/node_internals.h',
@@ -138,6 +138,7 @@
         'src/node_version.h',
         'src/node_watchdog.h',
         'src/node_wrap.h',
+        'src/node_i18n.h',
         'src/pipe_wrap.h',
         'src/queue.h',
         'src/smalloc.h',
@@ -150,6 +151,7 @@
         'src/tree.h',
         'src/util.h',
         'src/util-inl.h',
+        'src/util.cc',
         'deps/http_parser/http_parser.h',
         '<(SHARED_INTERMEDIATE_DIR)/node_natives.h',
         # javascript files to make for an even more pleasant IDE experience
@@ -167,6 +169,17 @@
       ],
 
       'conditions': [
+        [ 'v8_enable_i18n_support==1', {
+          'defines': [ 'NODE_HAVE_I18N_SUPPORT=1' ],
+          'dependencies': [
+            '<(icu_gyp_path):icui18n',
+            '<(icu_gyp_path):icuuc',
+          ],
+          'conditions': [
+            [ 'icu_small=="true"', {
+              'defines': [ 'NODE_HAVE_SMALL_ICU=1' ],
+          }]],
+        }],
         [ 'node_use_openssl=="true"', {
           'defines': [ 'HAVE_OPENSSL=1' ],
           'sources': [
@@ -185,7 +198,7 @@
                 './deps/openssl/openssl.gyp:openssl',
 
                 # For tests
-                './deps/openssl/openssl.gyp:openssl-cli'
+                './deps/openssl/openssl.gyp:openssl-cli',
               ],
             }]]
         }, {
@@ -265,6 +278,11 @@
         # Conditionally include v8 or v8ppc
         [ 'v8_postmortem_support=="true" and target_arch!="ppc" and target_arch!="ppc64"', {
           'dependencies': [ 'deps/v8/tools/gyp/v8.gyp:postmortem-metadata' ],
+          'xcode_settings': {
+            'OTHER_LDFLAGS': [
+              '-Wl,-force_load,<(V8_BASE)',
+            ],
+          },
         }],
         [ 'v8_postmortem_support=="true" and (target_arch=="ppc" or target_arch=="ppc64")', {
           'dependencies': [ 'deps/v8ppc/tools/gyp/v8.gyp:postmortem-metadata' ],

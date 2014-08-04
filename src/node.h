@@ -170,9 +170,26 @@ namespace node {
 NODE_EXTERN extern bool no_deprecation;
 
 NODE_EXTERN int Start(int argc, char *argv[]);
+NODE_EXTERN void Init(int* argc,
+                      const char** argv,
+                      int* exec_argc,
+                      const char*** exec_argv);
+
+class Environment;
+
+NODE_EXTERN Environment* CreateEnvironment(v8::Isolate* isolate,
+                                           v8::Handle<v8::Context> context,
+                                           int argc,
+                                           const char* const* argv,
+                                           int exec_argc,
+                                           const char* const* exec_argv);
+NODE_EXTERN void EmitBeforeExit(Environment* env);
+NODE_EXTERN int EmitExit(Environment* env);
+NODE_EXTERN void RunAtExit(Environment* env);
 
 /* Converts a unixtime to V8 Date */
-#define NODE_UNIXTIME_V8(t) v8::Date::New(1000*static_cast<double>(t))
+#define NODE_UNIXTIME_V8(t) v8::Date::New(v8::Isolate::GetCurrent(),          \
+    1000 * static_cast<double>(t))
 #define NODE_V8_UNIXTIME(v) (static_cast<double>((v)->NumberValue())/1000.0);
 
 // Used to be a macro, hence the uppercase name.

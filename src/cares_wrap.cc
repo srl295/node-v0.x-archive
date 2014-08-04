@@ -28,6 +28,7 @@
 #include "node.h"
 #include "req_wrap.h"
 #include "tree.h"
+#include "util.h"
 #include "uv.h"
 
 #include <assert.h>
@@ -39,6 +40,7 @@
     defined(__MINGW32__) || \
     defined(__OpenBSD__) || \
     defined(_MSC_VER)
+
 # include <nameser.h>
 #else
 # include <arpa/nameser.h>
@@ -63,6 +65,7 @@ using v8::String;
 using v8::Value;
 
 typedef class ReqWrap<uv_getaddrinfo_t> GetAddrInfoReqWrap;
+typedef class ReqWrap<uv_getnameinfo_t> GetNameInfoReqWrap;
 
 
 static int cmp_ares_tasks(const ares_task_t* a, const ares_task_t* b) {
@@ -88,7 +91,7 @@ static void ares_timeout(uv_timer_t* handle) {
 
 
 static void ares_poll_cb(uv_poll_t* watcher, int status, int events) {
-  ares_task_t* task = CONTAINER_OF(watcher, ares_task_t, poll_watcher);
+  ares_task_t* task = ContainerOf(&ares_task_t::poll_watcher, watcher);
   Environment* env = task->env;
 
   /* Reset the idle timer */
@@ -109,7 +112,8 @@ static void ares_poll_cb(uv_poll_t* watcher, int status, int events) {
 
 
 static void ares_poll_close_cb(uv_handle_t* watcher) {
-  ares_task_t* task = CONTAINER_OF(watcher, ares_task_t, poll_watcher);
+  ares_task_t* task = ContainerOf(&ares_task_t::poll_watcher,
+                                  reinterpret_cast<uv_poll_t*>(watcher));
   free(task);
 }
 
@@ -848,7 +852,7 @@ static void Query(const FunctionCallbackInfo<Value>& args) {
   Local<String> string = args[1].As<String>();
   Wrap* wrap = new Wrap(env, req_wrap_obj);
 
-  String::Utf8Value name(string);
+  node::Utf8Value name(string);
   int err = wrap->Send(*name);
   if (err)
     delete wrap;
@@ -955,11 +959,42 @@ void AfterGetAddrInfo(uv_getaddrinfo_t* req, int status, struct addrinfo* res) {
 }
 
 
+void AfterGetNameInfo(uv_getnameinfo_t* req,
+                      int status,
+                      const char* hostname,
+                      const char* service) {
+  GetNameInfoReqWrap* req_wrap = static_cast<GetNameInfoReqWrap*>(req->data);
+  Environment* env = req_wrap->env();
+
+  HandleScope handle_scope(env->isolate());
+  Context::Scope context_scope(env->context());
+
+  Local<Value> argv[] = {
+    Integer::New(env->isolate(), status),
+    Null(env->isolate()),
+    Null(env->isolate())
+  };
+
+  if (status == 0) {
+    // Success
+    Local<String> js_hostname = OneByteString(env->isolate(), hostname);
+    Local<String> js_service = OneByteString(env->isolate(), service);
+    argv[1] = js_hostname;
+    argv[2] = js_service;
+  }
+
+  // Make the callback into JavaScript
+  req_wrap->MakeCallback(env->oncomplete_string(), ARRAY_SIZE(argv), argv);
+
+  delete req_wrap;
+}
+
+
 static void IsIP(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args.GetIsolate());
   HandleScope scope(env->isolate());
 
-  String::Utf8Value ip(args[0]);
+  node::Utf8Value ip(args[0]);
   char address_buffer[sizeof(struct in6_addr)];
 
   int rc = 0;
@@ -980,7 +1015,7 @@ static void GetAddrInfo(const FunctionCallbackInfo<Value>& args) {
   assert(args[1]->IsString());
   assert(args[2]->IsInt32());
   Local<Object> req_wrap_obj = args[0].As<Object>();
-  String::Utf8Value hostname(args[1]);
+  node::Utf8Value hostname(args[1]);
 
   int family;
   switch (args[2]->Int32Value()) {
@@ -1014,6 +1049,39 @@ static void GetAddrInfo(const FunctionCallbackInfo<Value>& args) {
                            *hostname,
                            NULL,
                            &hints);
+  req_wrap->Dispatched();
+  if (err)
+    delete req_wrap;
+
+  args.GetReturnValue().Set(err);
+}
+
+
+static void GetNameInfo(const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args.GetIsolate());
+  HandleScope handle_scope(env->isolate());
+
+  CHECK(args[0]->IsObject());
+  CHECK(args[1]->IsString());
+  CHECK(args[2]->IsUint32());
+  Local<Object> req_wrap_obj = args[0].As<Object>();
+  node::Utf8Value ip(args[1]);
+  const unsigned port = args[2]->Uint32Value();
+  struct sockaddr_storage addr;
+
+  CHECK(uv_ip4_addr(*ip, port, reinterpret_cast<sockaddr_in*>(&addr)) == 0 ||
+        uv_ip6_addr(*ip, port, reinterpret_cast<sockaddr_in6*>(&addr)) == 0);
+
+  GetNameInfoReqWrap* req_wrap =
+      new GetNameInfoReqWrap(env,
+                             req_wrap_obj,
+                             AsyncWrap::PROVIDER_GETNAMEINFOREQWRAP);
+
+  int err = uv_getnameinfo(env->event_loop(),
+                           &req_wrap->req_,
+                           AfterGetNameInfo,
+                           (struct sockaddr*)&addr,
+                           NI_NAMEREQD);
   req_wrap->Dispatched();
   if (err)
     delete req_wrap;
@@ -1081,7 +1149,7 @@ static void SetServers(const FunctionCallbackInfo<Value>& args) {
     assert(elm->Get(1)->IsString());
 
     int fam = elm->Get(0)->Int32Value();
-    String::Utf8Value ip(elm->Get(1));
+    node::Utf8Value ip(elm->Get(1));
 
     ares_addr_node* cur = &servers[i];
 
@@ -1165,6 +1233,7 @@ static void Initialize(Handle<Object> target,
   NODE_SET_METHOD(target, "getHostByAddr", Query<GetHostByAddrWrap>);
 
   NODE_SET_METHOD(target, "getaddrinfo", GetAddrInfo);
+  NODE_SET_METHOD(target, "getnameinfo", GetNameInfo);
   NODE_SET_METHOD(target, "isIP", IsIP);
 
   NODE_SET_METHOD(target, "strerror", StrError);

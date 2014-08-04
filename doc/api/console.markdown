@@ -44,10 +44,21 @@ Same as `console.log` but prints to stderr.
 
 Same as `console.error`.
 
-## console.dir(obj)
+## console.dir(obj, [options])
 
 Uses `util.inspect` on `obj` and prints resulting string to stdout. This function
-bypasses any custom `inspect()` function on `obj`.
+bypasses any custom `inspect()` function on `obj`. An optional *options* object
+may be passed that alters certain aspects of the formatted string:
+
+- `showHidden` - if `true` then the object's non-enumerable properties will be
+shown too. Defaults to `false`.
+
+- `depth` - tells `inspect` how many times to recurse while formatting the
+object. This is useful for inspecting large complicated objects. Defaults to
+`2`. To make it recurse indefinitely pass `null`.
+
+- `colors` - if `true`, then the output will be styled with ANSI color codes.
+Defaults to `false`. Colors are customizable, see below.
 
 ## console.time(label)
 
@@ -63,14 +74,15 @@ Finish timer, record output. Example:
     }
     console.timeEnd('100-elements');
 
-## console.trace(label)
+## console.trace(message, [...])
 
-Print a stack trace to stderr of the current position.
+Print to stderr `'Trace :'`, followed by the formatted message and stack trace
+to the current position.
 
-## console.assert(expression, [message])
+## console.assert(value, [message], [...])
 
-Same as [assert.ok()][] where if the `expression` evaluates as `false` throw an
-AssertionError with `message`.
+Similar to [assert.ok()][], but the error message is formatted as
+`util.format(message...)`.
 
 [assert.ok()]: assert.html#assert_assert_value_message_assert_ok_value_message
 [util.format()]: util.html#util_util_format_format
