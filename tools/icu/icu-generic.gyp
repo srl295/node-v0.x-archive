@@ -17,9 +17,17 @@
       'type': 'none',
       'toolsets': [ 'host', 'target' ],
       'direct_dependent_settings': {
+        'conditions': [
+          [ 'icu_endianness == "l"', {
+             'defines': [
+                # ICU cannot swap the initial data without this. 
+                # http://bugs.icu-project.org/trac/ticket/11046 
+                'UCONFIG_NO_LEGACY_CONVERSION=1',
+                'UCONFIG_NO_IDNA=1',
+             ],
+          }],
+        ], 
         'defines': [
-          'UCONFIG_NO_LEGACY_CONVERSION=1',
-          'UCONFIG_NO_IDNA=1',
           'UCONFIG_NO_TRANSLITERATION=1',
           'UCONFIG_NO_SERVICE=1',
           'UCONFIG_NO_REGULAR_EXPRESSIONS=1',
@@ -46,6 +54,10 @@
           }],
           [ 'OS == "mac" or OS == "ios"', {
             'xcode_settings': {'GCC_ENABLE_CPP_RTTI': 'YES' },
+          }],
+          [ 'OS == "aix"', {
+            #'libraries': [ '-lpthread' ],
+             'ldflags': [ '-pthread' ],
           }],
           [ 'OS == "win"', {
             'msvs_settings': {
@@ -340,7 +352,7 @@
       'target_name': 'icutools',
       'type': '<(library)',
       'toolsets': [ 'host', 'target' ],
-      'dependencies': [ 'icuucx', 'icui18n', 'icustubdata' ],
+      'dependencies': [ 'icuucx', 'icui18n', 'icustubdata', 'icu_implementation' ],
       'sources': [
         '<@(icu_src_tools)'
       ],
@@ -364,7 +376,7 @@
       'target_name': 'genrb',
       'type': 'executable',
       'toolsets': [ 'host', 'target' ],
-      'dependencies': [ 'icutools', 'icuucx', 'icui18n' ],
+      'dependencies': [ 'icutools', 'icuucx', 'icui18n', 'icu_implementation' ],
       'sources': [
         '<@(icu_src_genrb)'
       ],
@@ -379,7 +391,7 @@
       'target_name': 'iculslocs',
       'toolsets': [ 'host', 'target' ],
       'type': 'executable',
-      'dependencies': [ 'icutools', 'icuucx', 'icui18n', 'icuio' ],
+      'dependencies': [ 'icutools', 'icuucx', 'icui18n', 'icuio', 'icu_implementation' ],
       'sources': [
         'iculslocs.cc',
       ],
@@ -390,7 +402,7 @@
       'target_name': 'icupkg',
       'toolsets': [ 'host', 'target' ],
       'type': 'executable',
-      'dependencies': [ 'icutools', 'icuucx', 'icui18n' ],
+      'dependencies': [ 'icutools', 'icuucx', 'icui18n', 'icu_implementation' ],
       'sources': [
         '<@(icu_src_icupkg)'
       ],
@@ -400,7 +412,7 @@
       'target_name': 'genccode',
       'toolsets': [ 'host', 'target' ],
       'type': 'executable',
-      'dependencies': [ 'icutools', 'icuucx', 'icui18n' ],
+      'dependencies': [ 'icutools', 'icuucx', 'icui18n', 'icu_implementation' ],
       'sources': [
         '<@(icu_src_genccode)',
         'no-op.cc',
