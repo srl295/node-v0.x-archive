@@ -372,7 +372,8 @@ cmd_touch = touch $@
 
 quiet_cmd_copy = COPY $@
 # send stderr to /dev/null to ignore messages when linking directories.
-cmd_copy = ln -f "$<" "$@" 2>/dev/null || (rm -rf "$@" && cp -af "$<" "$@")
+# TODO: aix needs "-p" not "-a"
+cmd_copy = ln -f "$<" "$@" 2>/dev/null || (rm -rf "$@" && cp -pf "$<" "$@")
 
 %(link_commands)s
 """
