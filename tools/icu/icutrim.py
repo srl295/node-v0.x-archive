@@ -149,7 +149,7 @@ if(config.has_key("comment")):
     print "%s: %s" % (args.filterfile, config["comment"])
 
 ## STEP 1 - copy the data file, swapping endianness
-endian_letter = "l"
+endian_letter = args.endian[0]
 
 
 runcmd("icupkg", "-t%s %s %s""" % (endian_letter, args.datfile, outfile))
