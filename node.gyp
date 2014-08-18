@@ -487,6 +487,17 @@
       ],
 
       'conditions': [
+        [ 'v8_enable_i18n_support==1', {
+          'defines': [ 'NODE_HAVE_I18N_SUPPORT=1' ],
+          'dependencies': [
+            '<(icu_gyp_path):icui18n',
+            '<(icu_gyp_path):icuuc',
+          ],
+          'conditions': [
+            [ 'icu_small=="true"', {
+              'defines': [ 'NODE_HAVE_SMALL_ICU=1' ],
+          }]],
+        }],
         [ 'node_use_openssl=="true"', {
           'defines': [ 'HAVE_OPENSSL=1' ],
           'sources': [
@@ -713,7 +724,8 @@
             ],
         }],
         [ 'OS=="aix"', {
-          'ldflags': ['-Wl,-bE:<(PRODUCT_DIR)/node.exp']
+          'ldflags': ['-Wl,-bE:<(PRODUCT_DIR)/node.exp'],
+	  'ldflags': ['-pthread'] 
         }],
       ],
        'actions': [
