@@ -66,26 +66,37 @@ extern "C" const char U_DATA_API SMALL_ICUDATA_ENTRY_POINT[];
 
 #endif
 
+#include <stdio.h>
+#define N_DBG(path,status,ptr) { fprintf(stderr,"%s:%d: p=%s %s ptr=%p\n", __FILE__, __LINE__, (path), u_errorName(status), (const void*)ptr); }
+
 namespace node {
 namespace i18n {
 
 bool InitializeICUDirectory(const char* icu_data_path) {
 #if defined(NODE_HAVE_I18N_SUPPORT)
   if (icu_data_path != NULL) {
+N_DBG(icu_data_path,U_ZERO_ERROR,NULL);
     u_setDataDirectory(icu_data_path);
     return true;  // no error
   } else {
     UErrorCode status = U_ZERO_ERROR;
+N_DBG(icu_data_path,status,NULL);
 #ifdef NODE_HAVE_SMALL_ICU
     // install the 'small' data.
     udata_setCommonData(&SMALL_ICUDATA_ENTRY_POINT, &status);
+N_DBG(icu_data_path,status,&SMALL_ICUDATA_ENTRY_POINT);
 #else  // !NODE_HAVE_SMALL_ICU
     // no small data, so nothing to do.
+N_DBG(icu_data_path,status,NULL);
 #endif  // !NODE_HAVE_SMALL_ICU
     return (status == U_ZERO_ERROR);
   }
 #else  // !NODE_HAVE_I18N_SUPPORT
+#define u_errorName(x) "N/A"
+#define U_ZERO_ERROR 0
+#define UErrorCode int
   // no i18n support - nothing to do.
+N_DBG(icu_data_path,U_ZERO_ERROR,NULL);
   return true;
 #endif  // !NODE_HAVE_I18N_SUPPORT
 }
