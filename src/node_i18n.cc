@@ -66,8 +66,12 @@ extern "C" const char U_DATA_API SMALL_ICUDATA_ENTRY_POINT[];
 
 #endif
 
+#ifdef NODE_DEBUG_I18N
 #include <stdio.h>
 #define N_DBG(path,status,ptr) { fprintf(stderr,"%s:%d: p=%s %s ptr=%p\n", __FILE__, __LINE__, (path), u_errorName(status), (const void*)ptr); }
+#else
+#define N_DBG(x,y,z)
+#endif
 
 namespace node {
 namespace i18n {
