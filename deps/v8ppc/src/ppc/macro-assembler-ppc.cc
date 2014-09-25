@@ -33,10 +33,15 @@ MacroAssembler::MacroAssembler(Isolate* arg_isolate, void* buffer, int size)
 }
 
 
-void MacroAssembler::Jump(Register target, Condition cond) {
-  ASSERT(cond == al);
+void MacroAssembler::Jump(Register target) {
   mtctr(target);
   bctr();
+}
+
+
+void MacroAssembler::JumpToJSEntry(Register target) {
+  ASSERT(target.is(ip));
+  Jump(target);
 }
 
 
@@ -49,12 +54,11 @@ void MacroAssembler::Jump(intptr_t target, RelocInfo::Mode rmode,
   ASSERT(rmode == RelocInfo::CODE_TARGET ||
          rmode == RelocInfo::RUNTIME_ENTRY);
 
-  mov(r0, Operand(target, rmode));
-  mtctr(r0);
+  mov(ip, Operand(target, rmode));
+  mtctr(ip);
   bctr();
 
   bind(&skip);
-  //  mov(pc, Operand(target, rmode), LeaveCC, cond);
 }
 
 
@@ -74,26 +78,31 @@ void MacroAssembler::Jump(Handle<Code> code, RelocInfo::Mode rmode,
 }
 
 
-int MacroAssembler::CallSize(Register target, Condition cond) {
+int MacroAssembler::CallSize(Register target) {
   return 2 * kInstrSize;
 }
 
 
-void MacroAssembler::Call(Register target, Condition cond) {
+void MacroAssembler::Call(Register target) {
   BlockTrampolinePoolScope block_trampoline_pool(this);
   Label start;
   bind(&start);
-  ASSERT(cond == al);  // in prep of removal of condition
 
   // Statement positions are expected to be recorded when the target
   // address is loaded.
   positions_recorder()->WriteRecordedPositions();
 
   // branch via link register and set LK bit for return point
-  mtlr(target);
-  bclr(BA, SetLK);
+  mtctr(target);
+  bctrl();
 
-  ASSERT_EQ(CallSize(target, cond), SizeOfCodeGeneratedSince(&start));
+  ASSERT_EQ(CallSize(target), SizeOfCodeGeneratedSince(&start));
+}
+
+
+void MacroAssembler::CallJSEntry(Register target) {
+  ASSERT(target.is(ip));
+  Call(target);
 }
 
 
@@ -155,8 +164,8 @@ void MacroAssembler::Call(Address target,
   //
 
   mov(ip, Operand(reinterpret_cast<intptr_t>(target), rmode));
-  mtlr(ip);
-  bclr(BA, SetLK);
+  mtctr(ip);
+  bctrl();
 
   ASSERT_EQ(expected_size, SizeOfCodeGeneratedSince(&start));
 }
@@ -222,8 +231,8 @@ void MacroAssembler::Call(Label* target) {
 
 
 void MacroAssembler::Push(Handle<Object> handle) {
-  mov(ip, Operand(handle));
-  push(ip);
+  mov(r0, Operand(handle));
+  push(r0);
 }
 
 
@@ -378,8 +387,8 @@ void MacroAssembler::RecordWrite(Register object,
                                  RememberedSetAction remembered_set_action,
                                  SmiCheck smi_check) {
   if (emit_debug_code()) {
-    LoadP(ip, MemOperand(address));
-    cmp(ip, value);
+    LoadP(r0, MemOperand(address));
+    cmp(r0, value);
     Check(eq, kWrongAddressOrValuePassedToRecordWrite);
   }
 
@@ -670,22 +679,31 @@ void MacroAssembler::ConvertDoubleToInt64(const DoubleRegister double_input,
 
 
 #if V8_OOL_CONSTANT_POOL
-void MacroAssembler::LoadConstantPoolPointerRegister() {
-  ConstantPoolUnavailableScope constant_pool_unavailable(this);
-  uintptr_t code_start = reinterpret_cast<uintptr_t>(pc_) - pc_offset();
+void MacroAssembler::LoadConstantPoolPointerRegister(
+    CodeObjectAccessMethod access_method,
+    int ip_code_entry_delta) {
+  Register base;
   int constant_pool_offset = Code::kConstantPoolOffset - Code::kHeaderSize;
-  mov(kConstantPoolRegister,
-      Operand(code_start, RelocInfo::INTERNAL_REFERENCE));
-  LoadP(kConstantPoolRegister,
-        MemOperand(kConstantPoolRegister, constant_pool_offset));
+  if (access_method == CAN_USE_IP) {
+    base = ip;
+    constant_pool_offset += ip_code_entry_delta;
+  } else {
+    ASSERT(access_method == CONSTRUCT_INTERNAL_REFERENCE);
+    base = kConstantPoolRegister;
+    ConstantPoolUnavailableScope constant_pool_unavailable(this);
+    uintptr_t code_start = reinterpret_cast<uintptr_t>(pc_) - pc_offset();
+    mov(base, Operand(code_start, RelocInfo::INTERNAL_REFERENCE));
+  }
+  LoadP(kConstantPoolRegister, MemOperand(base, constant_pool_offset));
 }
 #endif
 
 
-void MacroAssembler::Prologue(PrologueFrameMode frame_mode) {
+void MacroAssembler::Prologue(PrologueFrameMode frame_mode,
+                              int prologue_offset) {
   if (frame_mode == BUILD_STUB_FRAME) {
-    PushFixedFrame();
-    Push(Smi::FromInt(StackFrame::STUB));
+    LoadSmiLiteral(r11, Smi::FromInt(StackFrame::STUB));
+    PushFixedFrame(r11);
     // Adjust FP to point to saved FP.
     addi(fp, sp, Operand(StandardFrameConstants::kFixedFrameSizeFromFp));
   } else {
@@ -699,9 +717,10 @@ void MacroAssembler::Prologue(PrologueFrameMode frame_mode) {
       // This matches the code found in PatchPlatformCodeAge()
       Code* stub = Code::GetPreAgedCodeAgeStub(isolate());
       intptr_t target = reinterpret_cast<intptr_t>(stub->instruction_start());
-      mflr(ip);
+      // Don't use Call -- we need to preserve ip and lr
+      nop();  // marker to detect sequence (see IsOld)
       mov(r3, Operand(target));
-      Call(r3);
+      Jump(r3);
       for (int i = 0; i < kCodeAgingSequenceNops; i++) {
         nop();
       }
@@ -716,7 +735,8 @@ void MacroAssembler::Prologue(PrologueFrameMode frame_mode) {
     }
   }
 #if V8_OOL_CONSTANT_POOL
-  LoadConstantPoolPointerRegister();
+  // ip contains prologue address
+  LoadConstantPoolPointerRegister(CAN_USE_IP, -prologue_offset);
   set_constant_pool_available(true);
 #endif
 }
@@ -724,19 +744,23 @@ void MacroAssembler::Prologue(PrologueFrameMode frame_mode) {
 
 void MacroAssembler::EnterFrame(StackFrame::Type type,
                                 bool load_constant_pool) {
-  PushFixedFrame();
+  if (FLAG_enable_ool_constant_pool && load_constant_pool) {
+    PushFixedFrame();
 #if V8_OOL_CONSTANT_POOL
-  if (load_constant_pool) {
-    LoadConstantPoolPointerRegister();
-  }
+    // This path should not rely on ip containing code entry.
+    LoadConstantPoolPointerRegister(CONSTRUCT_INTERNAL_REFERENCE);
 #endif
-  LoadSmiLiteral(r0, Smi::FromInt(type));
-  push(r0);
+    LoadSmiLiteral(ip, Smi::FromInt(type));
+    push(ip);
+  } else {
+    LoadSmiLiteral(ip, Smi::FromInt(type));
+    PushFixedFrame(ip);
+  }
+  // Adjust FP to point to saved FP.
+  addi(fp, sp, Operand(StandardFrameConstants::kFixedFrameSizeFromFp));
+
   mov(r0, Operand(CodeObject()));
   push(r0);
-  // Adjust FP to point to saved FP.
-  addi(fp, sp,
-       Operand(StandardFrameConstants::kFixedFrameSizeFromFp + kPointerSize));
 }
 
 
@@ -1026,11 +1050,11 @@ void MacroAssembler::InvokeCode(Register code,
   if (!definitely_mismatches) {
     if (flag == CALL_FUNCTION) {
       call_wrapper.BeforeCall(CallSize(code));
-      Call(code);
+      CallJSEntry(code);
       call_wrapper.AfterCall();
     } else {
       ASSERT(flag == JUMP_FUNCTION);
-      Jump(code);
+      JumpToJSEntry(code);
     }
 
     // Continue here if InvokePrologue does handle the invocation due to
@@ -1051,7 +1075,7 @@ void MacroAssembler::InvokeFunction(Register fun,
   ASSERT(fun.is(r4));
 
   Register expected_reg = r5;
-  Register code_reg = r6;
+  Register code_reg = ip;
 
   LoadP(code_reg, FieldMemOperand(r4, JSFunction::kSharedFunctionInfoOffset));
   LoadP(cp, FieldMemOperand(r4, JSFunction::kContextOffset));
@@ -1086,8 +1110,8 @@ void MacroAssembler::InvokeFunction(Register function,
   // We call indirectly through the code field in the function to
   // allow recompilation to take effect without changing any of the
   // call sites.
-  LoadP(r6, FieldMemOperand(r4, JSFunction::kCodeEntryOffset));
-  InvokeCode(r6, expected, actual, flag, call_wrapper);
+  LoadP(ip, FieldMemOperand(r4, JSFunction::kCodeEntryOffset));
+  InvokeCode(ip, expected, actual, flag, call_wrapper);
 }
 
 
@@ -1908,7 +1932,7 @@ void MacroAssembler::CompareObjectType(Register object,
                                        Register map,
                                        Register type_reg,
                                        InstanceType type) {
-  const Register temp = type_reg.is(no_reg) ? ip : type_reg;
+  const Register temp = type_reg.is(no_reg) ? r0 : type_reg;
 
   LoadP(map, FieldMemOperand(object, HeapObject::kMapOffset));
   CompareInstanceType(map, temp, type);
@@ -1942,9 +1966,9 @@ void MacroAssembler::CompareInstanceType(Register map,
 
 void MacroAssembler::CompareRoot(Register obj,
                                  Heap::RootListIndex index) {
-  ASSERT(!obj.is(ip));
-  LoadRoot(ip, index);
-  cmp(obj, ip);
+  ASSERT(!obj.is(r0));
+  LoadRoot(r0, index);
+  cmp(obj, r0);
 }
 
 
@@ -2133,8 +2157,8 @@ void MacroAssembler::CheckMap(Register obj,
     JumpIfSmi(obj, fail);
   }
   LoadP(scratch, FieldMemOperand(obj, HeapObject::kMapOffset));
-  LoadRoot(ip, index);
-  cmp(scratch, ip);
+  LoadRoot(r0, index);
+  cmp(scratch, r0);
   bne(fail);
 }
 
@@ -2149,8 +2173,8 @@ void MacroAssembler::DispatchMap(Register obj,
     JumpIfSmi(obj, &fail);
   }
   LoadP(scratch, FieldMemOperand(obj, HeapObject::kMapOffset));
-  mov(ip, Operand(map));
-  cmp(scratch, ip);
+  mov(r0, Operand(map));
+  cmp(scratch, r0);
   bne(&fail);
   Jump(success, RelocInfo::CODE_TARGET, al);
   bind(&fail);
@@ -2193,8 +2217,8 @@ void MacroAssembler::TryGetFunctionPrototype(Register function,
   // If the prototype or initial map is the hole, don't return it and
   // simply miss the cache instead. This will allow us to allocate a
   // prototype object on-demand in the runtime system.
-  LoadRoot(ip, Heap::kTheHoleValueRootIndex);
-  cmp(result, ip);
+  LoadRoot(r0, Heap::kTheHoleValueRootIndex);
+  cmp(result, r0);
   beq(miss);
 
   // If the function does not have an initial map, we're done.
@@ -2323,15 +2347,15 @@ void MacroAssembler::CallApiFunctionAndReturn(
   }
   subi(r16, r16, Operand(1));
   stw(r16, MemOperand(r17, kLevelOffset));
-  LoadP(ip, MemOperand(r17, kLimitOffset));
-  cmp(r15, ip);
+  LoadP(r0, MemOperand(r17, kLimitOffset));
+  cmp(r15, r0);
   bne(&delete_allocated_handles);
 
   // Check if the function scheduled an exception.
   bind(&leave_exit_frame);
   LoadRoot(r14, Heap::kTheHoleValueRootIndex);
-  mov(ip, Operand(ExternalReference::scheduled_exception_address(isolate())));
-  LoadP(r15, MemOperand(ip));
+  mov(r15, Operand(ExternalReference::scheduled_exception_address(isolate())));
+  LoadP(r15, MemOperand(r15));
   cmp(r14, r15);
   bne(&promote_scheduled_exception);
   bind(&exception_handled);
@@ -2661,14 +2685,14 @@ void MacroAssembler::InvokeBuiltin(Builtins::JavaScript id,
   // You can't call a builtin without a valid frame.
   ASSERT(flag == JUMP_FUNCTION || has_frame());
 
-  GetBuiltinEntry(r5, id);
+  GetBuiltinEntry(ip, id);
   if (flag == CALL_FUNCTION) {
-    call_wrapper.BeforeCall(CallSize(r5));
-    Call(r5);
+    call_wrapper.BeforeCall(CallSize(ip));
+    CallJSEntry(ip);
     call_wrapper.AfterCall();
   } else {
     ASSERT(flag == JUMP_FUNCTION);
-    Jump(r5);
+    JumpToJSEntry(ip);
   }
 }
 
@@ -2737,18 +2761,18 @@ void MacroAssembler::Assert(Condition cond, BailoutReason reason,
 
 void MacroAssembler::AssertFastElements(Register elements) {
   if (emit_debug_code()) {
-    ASSERT(!elements.is(ip));
+    ASSERT(!elements.is(r0));
     Label ok;
     push(elements);
     LoadP(elements, FieldMemOperand(elements, HeapObject::kMapOffset));
-    LoadRoot(ip, Heap::kFixedArrayMapRootIndex);
-    cmp(elements, ip);
+    LoadRoot(r0, Heap::kFixedArrayMapRootIndex);
+    cmp(elements, r0);
     beq(&ok);
-    LoadRoot(ip, Heap::kFixedDoubleArrayMapRootIndex);
-    cmp(elements, ip);
+    LoadRoot(r0, Heap::kFixedDoubleArrayMapRootIndex);
+    cmp(elements, r0);
     beq(&ok);
-    LoadRoot(ip, Heap::kFixedCOWArrayMapRootIndex);
-    cmp(elements, ip);
+    LoadRoot(r0, Heap::kFixedCOWArrayMapRootIndex);
+    cmp(elements, r0);
     beq(&ok);
     Abort(kJSObjectWithFastElementsMapHasSlowElements);
     bind(&ok);
@@ -2830,8 +2854,8 @@ void MacroAssembler::LoadTransitionedArrayMapConditional(
                  Context::SlotOffset(Context::JS_ARRAY_MAPS_INDEX)));
   size_t offset = expected_kind * kPointerSize +
       FixedArrayBase::kHeaderSize;
-  LoadP(ip, FieldMemOperand(scratch, offset));
-  cmp(map_in_out, ip);
+  LoadP(r0, FieldMemOperand(scratch, offset));
+  cmp(map_in_out, r0);
   bne(no_map_match);
 
   // Use the transitioned cached map.
@@ -3450,8 +3474,8 @@ void MacroAssembler::EmitSeqStringSetCharCheck(Register string,
   bind(&index_tag_ok);
 #endif
 
-  LoadP(ip, FieldMemOperand(string, String::kLengthOffset));
-  cmp(index, ip);
+  LoadP(r0, FieldMemOperand(string, String::kLengthOffset));
+  cmp(index, r0);
   Check(lt, kIndexIsTooLarge);
 
   ASSERT(Smi::FromInt(0) == 0);
@@ -4656,28 +4680,15 @@ void MacroAssembler::LoadWordArith(Register dst, const MemOperand& mem,
 // Variable length depending on whether offset fits into immediate field
 // MemOperand currently only supports d-form
 void MacroAssembler::LoadWord(Register dst, const MemOperand& mem,
-                              Register scratch, bool updateForm) {
+                              Register scratch) {
   Register base = mem.ra();
   int offset = mem.offset();
 
-  bool use_dform = true;
   if (!is_int16(offset)) {
-    use_dform = false;
     LoadIntLiteral(scratch, offset);
-  }
-
-  if (!updateForm) {
-    if (use_dform) {
-      lwz(dst, mem);
-    } else {
-      lwzx(dst, MemOperand(base, scratch));
-    }
+    lwzx(dst, MemOperand(base, scratch));
   } else {
-    if (use_dform) {
-      lwzu(dst, mem);
-    } else {
-      lwzux(dst, MemOperand(base, scratch));
-    }
+    lwz(dst, mem);
   }
 }
 
@@ -4685,28 +4696,15 @@ void MacroAssembler::LoadWord(Register dst, const MemOperand& mem,
 // Variable length depending on whether offset fits into immediate field
 // MemOperand current only supports d-form
 void MacroAssembler::StoreWord(Register src, const MemOperand& mem,
-                               Register scratch, bool updateForm) {
+                               Register scratch) {
   Register base = mem.ra();
   int offset = mem.offset();
 
-  bool use_dform = true;
   if (!is_int16(offset)) {
-    use_dform = false;
     LoadIntLiteral(scratch, offset);
-  }
-
-  if (!updateForm) {
-    if (use_dform) {
-      stw(src, mem);
-    } else {
-      stwx(src, MemOperand(base, scratch));
-    }
+    stwx(src, MemOperand(base, scratch));
   } else {
-    if (use_dform) {
-      stwu(src, mem);
-    } else {
-      stwux(src, MemOperand(base, scratch));
-    }
+    stw(src, mem);
   }
 }
 
@@ -4714,33 +4712,15 @@ void MacroAssembler::StoreWord(Register src, const MemOperand& mem,
 // Variable length depending on whether offset fits into immediate field
 // MemOperand currently only supports d-form
 void MacroAssembler::LoadHalfWord(Register dst, const MemOperand& mem,
-                                  Register scratch, bool updateForm) {
+                                  Register scratch) {
   Register base = mem.ra();
   int offset = mem.offset();
 
-  bool use_dform = true;
   if (!is_int16(offset)) {
-    use_dform = false;
     LoadIntLiteral(scratch, offset);
-  }
-
-  if (!updateForm) {
-    if (use_dform) {
-      lhz(dst, mem);
-    } else {
-      lhzx(dst, MemOperand(base, scratch));
-    }
+    lhzx(dst, MemOperand(base, scratch));
   } else {
-    // If updateForm is ever true, then lhzu will
-    // need to be implemented
-    assert(0);
-#if 0  // LoadHalfWord w\ update not yet needed
-    if (use_dform) {
-      lhzu(dst, mem);
-    } else {
-      lhzux(dst, MemOperand(base, scratch));
-    }
-#endif
+    lhz(dst, mem);
   }
 }
 
@@ -4748,33 +4728,15 @@ void MacroAssembler::LoadHalfWord(Register dst, const MemOperand& mem,
 // Variable length depending on whether offset fits into immediate field
 // MemOperand current only supports d-form
 void MacroAssembler::StoreHalfWord(Register src, const MemOperand& mem,
-                                   Register scratch, bool updateForm) {
+                                   Register scratch) {
   Register base = mem.ra();
   int offset = mem.offset();
 
-  bool use_dform = true;
   if (!is_int16(offset)) {
-    use_dform = false;
     LoadIntLiteral(scratch, offset);
-  }
-
-  if (!updateForm) {
-    if (use_dform) {
-      sth(src, mem);
-    } else {
-      sthx(src, MemOperand(base, scratch));
-    }
+    sthx(src, MemOperand(base, scratch));
   } else {
-    // If updateForm is ever true, then sthu will
-    // need to be implemented
-    assert(0);
-#if 0  // StoreHalfWord w\ update not yet needed
-    if (use_dform) {
-      sthu(src, mem);
-    } else {
-      sthux(src, MemOperand(base, scratch));
-    }
-#endif
+    sth(src, mem);
   }
 }
 
@@ -4782,33 +4744,15 @@ void MacroAssembler::StoreHalfWord(Register src, const MemOperand& mem,
 // Variable length depending on whether offset fits into immediate field
 // MemOperand currently only supports d-form
 void MacroAssembler::LoadByte(Register dst, const MemOperand& mem,
-                              Register scratch, bool updateForm) {
+                              Register scratch) {
   Register base = mem.ra();
   int offset = mem.offset();
 
-  bool use_dform = true;
   if (!is_int16(offset)) {
-    use_dform = false;
     LoadIntLiteral(scratch, offset);
-  }
-
-  if (!updateForm) {
-    if (use_dform) {
-      lbz(dst, mem);
-    } else {
-      lbzx(dst, MemOperand(base, scratch));
-    }
+    lbzx(dst, MemOperand(base, scratch));
   } else {
-    // If updateForm is ever true, then lbzu will
-    // need to be implemented
-    assert(0);
-#if 0  // LoadByte w\ update not yet needed
-    if (use_dform) {
-      lbzu(dst, mem);
-    } else {
-      lbzux(dst, MemOperand(base, scratch));
-    }
-#endif
+    lbz(dst, mem);
   }
 }
 
@@ -4816,33 +4760,15 @@ void MacroAssembler::LoadByte(Register dst, const MemOperand& mem,
 // Variable length depending on whether offset fits into immediate field
 // MemOperand current only supports d-form
 void MacroAssembler::StoreByte(Register src, const MemOperand& mem,
-                               Register scratch, bool updateForm) {
+                               Register scratch) {
   Register base = mem.ra();
   int offset = mem.offset();
 
-  bool use_dform = true;
   if (!is_int16(offset)) {
-    use_dform = false;
     LoadIntLiteral(scratch, offset);
-  }
-
-  if (!updateForm) {
-    if (use_dform) {
-      stb(src, mem);
-    } else {
-      stbx(src, MemOperand(base, scratch));
-    }
+    stbx(src, MemOperand(base, scratch));
   } else {
-    // If updateForm is ever true, then stbu will
-    // need to be implemented
-    assert(0);
-#if 0  // StoreByte w\ update not yet needed
-    if (use_dform) {
-      stbu(src, mem);
-    } else {
-      stbux(src, MemOperand(base, scratch));
-    }
-#endif
+    stb(src, mem);
   }
 }
 
