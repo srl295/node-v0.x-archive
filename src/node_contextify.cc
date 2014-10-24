@@ -28,6 +28,7 @@
 #include "env-inl.h"
 #include "util.h"
 #include "util-inl.h"
+#include "v8-debug.h"
 
 namespace node {
 
@@ -35,6 +36,7 @@ using v8::AccessType;
 using v8::Array;
 using v8::Boolean;
 using v8::Context;
+using v8::Debug;
 using v8::EscapableHandleScope;
 using v8::External;
 using v8::Function;
@@ -244,8 +246,22 @@ class ContextifyContext {
     function_template->InstanceTemplate()->SetInternalFieldCount(1);
     env->set_script_data_constructor_function(function_template->GetFunction());
 
+    NODE_SET_METHOD(target, "runInDebugContext", RunInDebugContext);
     NODE_SET_METHOD(target, "makeContext", MakeContext);
     NODE_SET_METHOD(target, "isContext", IsContext);
+  }
+
+
+  static void RunInDebugContext(const FunctionCallbackInfo<Value>& args) {
+    HandleScope scope(args.GetIsolate());
+    Local<String> script_source(args[0]->ToString());
+    if (script_source.IsEmpty())
+      return;  // Exception pending.
+    Context::Scope context_scope(Debug::GetDebugContext());
+    Local<Script> script = Script::Compile(script_source);
+    if (script.IsEmpty())
+      return;  // Exception pending.
+    args.GetReturnValue().Set(script->Run());
   }
 
 
@@ -521,18 +537,24 @@ class ContextifyScript : public BaseObject {
     Environment* env = Environment::GetCurrent(args.GetIsolate());
     HandleScope scope(env->isolate());
 
+    int64_t timeout;
+    bool display_errors;
+
     // Assemble arguments
-    TryCatch try_catch;
     if (!args[0]->IsObject()) {
       return env->ThrowTypeError(
           "contextifiedSandbox argument must be an object.");
     }
+
     Local<Object> sandbox = args[0].As<Object>();
-    int64_t timeout = GetTimeoutArg(args, 1);
-    bool display_errors = GetDisplayErrorsArg(args, 1);
-    if (try_catch.HasCaught()) {
-      try_catch.ReThrow();
-      return;
+    {
+      TryCatch try_catch;
+      timeout = GetTimeoutArg(args, 1);
+      display_errors = GetDisplayErrorsArg(args, 1);
+      if (try_catch.HasCaught()) {
+        try_catch.ReThrow();
+        return;
+      }
     }
 
     // Get the context from the sandbox
@@ -547,14 +569,22 @@ class ContextifyScript : public BaseObject {
     if (contextify_context->context().IsEmpty())
       return;
 
-    // Do the eval within the context
-    Context::Scope context_scope(contextify_context->context());
-    if (EvalMachine(contextify_context->env(),
-                    timeout,
-                    display_errors,
-                    args,
-                    try_catch)) {
-      contextify_context->CopyProperties();
+    {
+      TryCatch try_catch;
+      // Do the eval within the context
+      Context::Scope context_scope(contextify_context->context());
+      if (EvalMachine(contextify_context->env(),
+                      timeout,
+                      display_errors,
+                      args,
+                      try_catch)) {
+        contextify_context->CopyProperties();
+      }
+
+      if (try_catch.HasCaught()) {
+        try_catch.ReThrow();
+        return;
+      }
     }
   }
 

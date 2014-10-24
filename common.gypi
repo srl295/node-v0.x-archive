@@ -26,15 +26,15 @@
       }],
       ['GENERATOR == "ninja" or OS== "mac"', {
         'OBJ_DIR': '<(PRODUCT_DIR)/obj',
-        'V8_BASE': '<(PRODUCT_DIR)/libv8_base.<(target_arch).a',
+        'V8_BASE': '<(PRODUCT_DIR)/libv8_base.a',
       }],
       ['GENERATOR != "ninja" and OS!="mac" and target_arch not in "ppc ppc64"', {   
-          'OBJ_DIR': '<(PRODUCT_DIR)/obj.target',
-          'V8_BASE': '<(PRODUCT_DIR)/obj.target/deps/v8/tools/gyp/libv8_base.<(target_arch).a',
+        'OBJ_DIR': '<(PRODUCT_DIR)/obj.target',
+        'V8_BASE': '<(PRODUCT_DIR)/obj.target/deps/v8/tools/gyp/libv8_base.a',
       }],
       ['GENERATOR != "ninja" and OS!="mac" and target_arch in "ppc ppc64"', {   
-          'OBJ_DIR': '<(PRODUCT_DIR)/obj.target',
-          'V8_BASE': '<(PRODUCT_DIR)/obj.target/deps/v8ppc/tools/gyp/libv8_base.<(target_arch).a',
+        'OBJ_DIR': '<(PRODUCT_DIR)/obj.target',
+        'V8_BASE': '<(PRODUCT_DIR)/obj.target/deps/v8ppc/tools/gyp/libv8_base.a',
       }],
     ],
   },
@@ -276,6 +276,11 @@
       }],
       ['OS=="freebsd" and node_use_dtrace=="true"', {
         'libraries': [ '-lelf' ],
+      }],
+      ['OS=="freebsd"', {
+        'ldflags': [
+          '-Wl,--export-dynamic',
+        ],
       }]
     ],
   }

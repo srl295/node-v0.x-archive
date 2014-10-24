@@ -111,7 +111,7 @@ Example:
     console.log(ciphers); // ['AES128-SHA', 'AES256-SHA', ...]
 
 
-## tls.createServer(options, [secureConnectionListener])
+## tls.createServer(options[, secureConnectionListener])
 
 Creates a new [tls.Server][].  The `connectionListener` argument is
 automatically set as a listener for the [secureConnection][] event.  The
@@ -195,6 +195,10 @@ automatically set as a listener for the [secureConnection][] event.  The
   - `rejectUnauthorized`: If `true` the server will reject any connection
     which is not authorized with the list of supplied CAs. This option only
     has an effect if `requestCert` is `true`. Default: `false`.
+
+  - `checkServerIdentity(servername, cert)`: Provide an override for checking
+    server's hostname against the certificate. Should return an error if verification
+    fails. Return `undefined` if passing.
 
   - `NPNProtocols`: An array or `Buffer` of possible NPN protocols. (Protocols
     should be ordered by their priority).
@@ -281,8 +285,8 @@ You can test this server by connecting to it with `openssl s_client`:
     openssl s_client -connect 127.0.0.1:8000
 
 
-## tls.connect(options, [callback])
-## tls.connect(port, [host], [options], [callback])
+## tls.connect(options[, callback])
+## tls.connect(port[, host][, options][, callback])
 
 Creates a new client connection to the given `port` and `host` (old API) or
 `options.port` and `options.host`. (If `host` is omitted, it defaults to
@@ -424,8 +428,6 @@ Construct a new TLSSocket object from existing TCP socket.
 
 ## tls.createSecureContext(details)
 
-Stability: 0 - Deprecated. Use tls.createSecureContext instead.
-
 Creates a credentials object, with the optional details being a
 dictionary with keys:
 
@@ -451,7 +453,7 @@ publicly trusted list of CAs as given in
 <http://mxr.mozilla.org/mozilla/source/security/nss/lib/ckfw/builtins/certdata.txt>.
 
 
-## tls.createSecurePair([context], [isServer], [requestCert], [rejectUnauthorized])
+## tls.createSecurePair([context][, isServer][, requestCert][, rejectUnauthorized])
 
     Stability: 0 - Deprecated. Use tls.TLSSocket instead.
 
@@ -590,7 +592,7 @@ NOTE: you may want to use some npm module like [asn1.js] to parse the
 certificates.
 
 
-### server.listen(port, [host], [callback])
+### server.listen(port[, host][, callback])
 
 Begin accepting connections on the specified `port` and `host`.  If the
 `host` is omitted, the server will accept connections directed to any

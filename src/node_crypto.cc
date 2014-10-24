@@ -69,7 +69,7 @@ static const char CERTIFICATE_PFX[] =  "-----BEGIN CERTIFICATE-----";
 static const int CERTIFICATE_PFX_LEN = sizeof(CERTIFICATE_PFX) - 1;
 
 static const int X509_NAME_FLAGS = ASN1_STRFLGS_ESC_CTRL
-                                 | ASN1_STRFLGS_ESC_MSB
+                                 | ASN1_STRFLGS_UTF8_CONVERT
                                  | XN_FLAG_SEP_MULTILINE
                                  | XN_FLAG_FN_SN;
 
@@ -81,6 +81,7 @@ using v8::Boolean;
 using v8::Context;
 using v8::EscapableHandleScope;
 using v8::Exception;
+using v8::External;
 using v8::False;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
@@ -120,8 +121,7 @@ X509_STORE* root_cert_store;
 template class SSLWrap<TLSCallbacks>;
 template void SSLWrap<TLSCallbacks>::AddMethods(Environment* env,
                                                 Handle<FunctionTemplate> t);
-template void SSLWrap<TLSCallbacks>::InitNPN(SecureContext* sc,
-                                             TLSCallbacks* base);
+template void SSLWrap<TLSCallbacks>::InitNPN(SecureContext* sc);
 template SSL_SESSION* SSLWrap<TLSCallbacks>::GetSessionCallback(
     SSL* s,
     unsigned char* key,
@@ -286,6 +286,11 @@ void SecureContext::Initialize(Environment* env, Handle<Object> target) {
   NODE_SET_PROTOTYPE_METHOD(t,
                             "getIssuer",
                             SecureContext::GetCertificate<false>);
+
+  NODE_SET_EXTERNAL(
+      t->PrototypeTemplate(),
+      "_external",
+      CtxGetter);
 
   target->Set(FIXED_ONE_BYTE_STRING(env->isolate(), "SecureContext"),
               t->GetFunction());
@@ -957,6 +962,16 @@ void SecureContext::SetTicketKeys(const FunctionCallbackInfo<Value>& args) {
 }
 
 
+void SecureContext::CtxGetter(Local<String> property,
+                              const PropertyCallbackInfo<Value>& info) {
+  HandleScope scope(info.GetIsolate());
+
+  SSL_CTX* ctx = Unwrap<SecureContext>(info.Holder())->ctx_;
+  Local<External> ext = External::New(info.GetIsolate(), ctx);
+  info.GetReturnValue().Set(ext);
+}
+
+
 template <bool primary>
 void SecureContext::GetCertificate(const FunctionCallbackInfo<Value>& args) {
   HandleScope scope(args.GetIsolate());
@@ -1007,32 +1022,35 @@ void SSLWrap<Base>::AddMethods(Environment* env, Handle<FunctionTemplate> t) {
 
 #ifdef OPENSSL_NPN_NEGOTIATED
   NODE_SET_PROTOTYPE_METHOD(t, "getNegotiatedProtocol", GetNegotiatedProto);
-  NODE_SET_PROTOTYPE_METHOD(t, "setNPNProtocols", SetNPNProtocols);
 #endif  // OPENSSL_NPN_NEGOTIATED
+
+#ifdef OPENSSL_NPN_NEGOTIATED
+  NODE_SET_PROTOTYPE_METHOD(t, "setNPNProtocols", SetNPNProtocols);
+#endif
+
+  NODE_SET_EXTERNAL(
+      t->PrototypeTemplate(),
+      "_external",
+      SSLGetter);
 }
 
 
 template <class Base>
-void SSLWrap<Base>::InitNPN(SecureContext* sc, Base* base) {
-  if (base->is_server()) {
+void SSLWrap<Base>::InitNPN(SecureContext* sc) {
 #ifdef OPENSSL_NPN_NEGOTIATED
-    // Server should advertise NPN protocols
-    SSL_CTX_set_next_protos_advertised_cb(sc->ctx_,
-                                          AdvertiseNextProtoCallback,
-                                          base);
+  // Server should advertise NPN protocols
+  SSL_CTX_set_next_protos_advertised_cb(sc->ctx_,
+                                        AdvertiseNextProtoCallback,
+                                        NULL);
+  // Client should select protocol from list of advertised
+  // If server supports NPN
+  SSL_CTX_set_next_proto_select_cb(sc->ctx_, SelectNextProtoCallback, NULL);
 #endif  // OPENSSL_NPN_NEGOTIATED
-  } else {
-#ifdef OPENSSL_NPN_NEGOTIATED
-    // Client should select protocol from list of advertised
-    // If server supports NPN
-    SSL_CTX_set_next_proto_select_cb(sc->ctx_, SelectNextProtoCallback, base);
-#endif  // OPENSSL_NPN_NEGOTIATED
-  }
 
 #ifdef NODE__HAVE_TLSEXT_STATUS_CB
   // OCSP stapling
   SSL_CTX_set_tlsext_status_cb(sc->ctx_, TLSExtStatusCallback);
-  SSL_CTX_set_tlsext_status_arg(sc->ctx_, base);
+  SSL_CTX_set_tlsext_status_arg(sc->ctx_, NULL);
 #endif  // NODE__HAVE_TLSEXT_STATUS_CB
 }
 
@@ -1130,7 +1148,8 @@ static Local<Object> X509ToObject(Environment* env, X509* cert) {
                          X509_NAME_FLAGS) > 0) {
     BIO_get_mem_ptr(bio, &mem);
     info->Set(env->subject_string(),
-              OneByteString(env->isolate(), mem->data, mem->length));
+              String::NewFromUtf8(env->isolate(), mem->data,
+                                  String::kNormalString, mem->length));
   }
   (void) BIO_reset(bio);
 
@@ -1138,7 +1157,8 @@ static Local<Object> X509ToObject(Environment* env, X509* cert) {
   if (X509_NAME_print_ex(bio, issuer_name, 0, X509_NAME_FLAGS) > 0) {
     BIO_get_mem_ptr(bio, &mem);
     info->Set(env->issuer_string(),
-              OneByteString(env->isolate(), mem->data, mem->length));
+              String::NewFromUtf8(env->isolate(), mem->data,
+                                  String::kNormalString, mem->length));
   }
   (void) BIO_reset(bio);
 
@@ -1162,7 +1182,8 @@ static Local<Object> X509ToObject(Environment* env, X509* cert) {
 
     BIO_get_mem_ptr(bio, &mem);
     info->Set(keys[i],
-              OneByteString(env->isolate(), mem->data, mem->length));
+              String::NewFromUtf8(env->isolate(), mem->data,
+                                  String::kNormalString, mem->length));
 
     (void) BIO_reset(bio);
   }
@@ -1176,13 +1197,15 @@ static Local<Object> X509ToObject(Environment* env, X509* cert) {
       BN_print(bio, rsa->n);
       BIO_get_mem_ptr(bio, &mem);
       info->Set(env->modulus_string(),
-                OneByteString(env->isolate(), mem->data, mem->length));
+                String::NewFromUtf8(env->isolate(), mem->data,
+                                    String::kNormalString, mem->length));
       (void) BIO_reset(bio);
 
       BN_print(bio, rsa->e);
       BIO_get_mem_ptr(bio, &mem);
       info->Set(env->exponent_string(),
-                OneByteString(env->isolate(), mem->data, mem->length));
+                String::NewFromUtf8(env->isolate(), mem->data,
+                                    String::kNormalString, mem->length));
       (void) BIO_reset(bio);
   }
 
@@ -1198,13 +1221,15 @@ static Local<Object> X509ToObject(Environment* env, X509* cert) {
   ASN1_TIME_print(bio, X509_get_notBefore(cert));
   BIO_get_mem_ptr(bio, &mem);
   info->Set(env->valid_from_string(),
-            OneByteString(env->isolate(), mem->data, mem->length));
+            String::NewFromUtf8(env->isolate(), mem->data,
+                                String::kNormalString, mem->length));
   (void) BIO_reset(bio);
 
   ASN1_TIME_print(bio, X509_get_notAfter(cert));
   BIO_get_mem_ptr(bio, &mem);
   info->Set(env->valid_to_string(),
-            OneByteString(env->isolate(), mem->data, mem->length));
+            String::NewFromUtf8(env->isolate(), mem->data,
+                                String::kNormalString, mem->length));
   BIO_free_all(bio);
 
   unsigned int md_size, i;
@@ -1681,7 +1706,7 @@ int SSLWrap<Base>::AdvertiseNextProtoCallback(SSL* s,
                                               const unsigned char** data,
                                               unsigned int* len,
                                               void* arg) {
-  Base* w = static_cast<Base*>(arg);
+  Base* w = static_cast<Base*>(SSL_get_app_data(s));
   Environment* env = w->env();
   HandleScope handle_scope(env->isolate());
   Context::Scope context_scope(env->context());
@@ -1707,7 +1732,7 @@ int SSLWrap<Base>::SelectNextProtoCallback(SSL* s,
                                            const unsigned char* in,
                                            unsigned int inlen,
                                            void* arg) {
-  Base* w = static_cast<Base*>(arg);
+  Base* w = static_cast<Base*>(SSL_get_app_data(s));
   Environment* env = w->env();
   HandleScope handle_scope(env->isolate());
   Context::Scope context_scope(env->context());
@@ -1799,7 +1824,7 @@ void SSLWrap<Base>::SetNPNProtocols(const FunctionCallbackInfo<Value>& args) {
 #ifdef NODE__HAVE_TLSEXT_STATUS_CB
 template <class Base>
 int SSLWrap<Base>::TLSExtStatusCallback(SSL* s, void* arg) {
-  Base* w = static_cast<Base*>(arg);
+  Base* w = static_cast<Base*>(SSL_get_app_data(s));
   Environment* env = w->env();
   HandleScope handle_scope(env->isolate());
 
@@ -1843,6 +1868,17 @@ int SSLWrap<Base>::TLSExtStatusCallback(SSL* s, void* arg) {
   }
 }
 #endif  // NODE__HAVE_TLSEXT_STATUS_CB
+
+
+template <class Base>
+void SSLWrap<Base>::SSLGetter(Local<String> property,
+                        const PropertyCallbackInfo<Value>& info) {
+  HandleScope scope(info.GetIsolate());
+
+  SSL* ssl = Unwrap<Base>(info.Holder())->ssl_;
+  Local<External> ext = External::New(info.GetIsolate(), ssl);
+  info.GetReturnValue().Set(ext);
+}
 
 
 void Connection::OnClientHelloParseEnd(void* arg) {
@@ -2024,15 +2060,6 @@ void Connection::Initialize(Environment* env, Handle<Object> target) {
 
   SSLWrap<Connection>::AddMethods(env, t);
 
-#ifdef OPENSSL_NPN_NEGOTIATED
-  NODE_SET_PROTOTYPE_METHOD(t,
-                            "getNegotiatedProtocol",
-                            Connection::GetNegotiatedProto);
-  NODE_SET_PROTOTYPE_METHOD(t,
-                            "setNPNProtocols",
-                            Connection::SetNPNProtocols);
-#endif
-
 
 #ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
   NODE_SET_PROTOTYPE_METHOD(t, "getServername", Connection::GetServername);
@@ -2115,7 +2142,7 @@ int Connection::SelectSNIContextCallback_(SSL *s, int *ad, void* arg) {
       if (secure_context_constructor_template->HasInstance(ret)) {
         conn->sniContext_.Reset(env->isolate(), ret);
         SecureContext* sc = Unwrap<SecureContext>(ret.As<Object>());
-        InitNPN(sc, conn);
+        InitNPN(sc);
         SSL_set_SSL_CTX(s, sc->ctx_);
       } else {
         return SSL_TLSEXT_ERR_NOACK;
@@ -2151,7 +2178,7 @@ void Connection::New(const FunctionCallbackInfo<Value>& args) {
   if (is_server)
     SSL_set_info_callback(conn->ssl_, SSLInfoCallback);
 
-  InitNPN(sc, conn);
+  InitNPN(sc);
 
 #ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
   if (is_server) {
@@ -4716,7 +4743,7 @@ void RandomBytes(const FunctionCallbackInfo<Value>& args) {
   // maybe allow a buffer to write to? cuts down on object creation
   // when generating random data in a loop
   if (!args[0]->IsUint32()) {
-    return env->ThrowTypeError("Argument #1 must be number > 0");
+    return env->ThrowTypeError("size must be a number >= 0");
   }
 
   const uint32_t size = args[0]->Uint32Value();

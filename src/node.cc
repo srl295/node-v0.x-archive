@@ -35,6 +35,10 @@
 #include "node_crypto.h"
 #endif
 
+#if defined(NODE_HAVE_I18N_SUPPORT)
+#include "node_i18n.h"
+#endif
+
 #if defined HAVE_DTRACE || defined HAVE_ETW
 #include "node_dtrace.h"
 #endif
@@ -116,11 +120,7 @@ using v8::TryCatch;
 using v8::Uint32;
 using v8::V8;
 using v8::Value;
-using v8::kExternalUnsignedIntArray;
-
-// FIXME(bnoordhuis) Make these per-context?
-QUEUE handle_wrap_queue = { &handle_wrap_queue, &handle_wrap_queue };
-QUEUE req_wrap_queue = { &req_wrap_queue, &req_wrap_queue };
+using v8::kExternalUint32Array;
 
 static bool print_eval = false;
 static bool force_repl = false;
@@ -134,6 +134,11 @@ static bool v8_is_profiling = false;
 static node_module* modpending;
 static node_module* modlist_builtin;
 static node_module* modlist_addon;
+
+#if defined(NODE_HAVE_I18N_SUPPORT)
+// Path to ICU data (for i18n / Intl)
+static const char* icu_data_dir = NULL;
+#endif
 
 // used by C++ modules as well
 bool no_deprecation = false;
@@ -923,7 +928,7 @@ void SetupAsyncListener(const FunctionCallbackInfo<Value>& args) {
   Environment::AsyncListener* async_listener = env->async_listener();
   async_listener_flag_obj->SetIndexedPropertiesToExternalArrayData(
       async_listener->fields(),
-      kExternalUnsignedIntArray,
+      kExternalUint32Array,
       async_listener->fields_count());
 
   // Do a little housekeeping.
@@ -963,12 +968,16 @@ void SetupDomainUse(const FunctionCallbackInfo<Value>& args) {
   Environment::DomainFlag* domain_flag = env->domain_flag();
   domain_flag_obj->SetIndexedPropertiesToExternalArrayData(
       domain_flag->fields(),
-      kExternalUnsignedIntArray,
+      kExternalUint32Array,
       domain_flag->fields_count());
 
   // Do a little housekeeping.
   env->process_object()->Delete(
       FIXED_ONE_BYTE_STRING(args.GetIsolate(), "_setupDomainUse"));
+}
+
+void RunMicrotasks(const FunctionCallbackInfo<Value>& args) {
+  args.GetIsolate()->RunMicrotasks();
 }
 
 
@@ -978,15 +987,18 @@ void SetupNextTick(const FunctionCallbackInfo<Value>& args) {
 
   assert(args[0]->IsObject());
   assert(args[1]->IsFunction());
+  assert(args[2]->IsObject());
 
   // Values use to cross communicate with processNextTick.
   Local<Object> tick_info_obj = args[0].As<Object>();
   tick_info_obj->SetIndexedPropertiesToExternalArrayData(
       env->tick_info()->fields(),
-      kExternalUnsignedIntArray,
+      kExternalUint32Array,
       env->tick_info()->fields_count());
 
   env->set_tick_callback_function(args[1].As<Function>());
+
+  NODE_SET_METHOD(args[2].As<Object>(), "runMicrotasks", RunMicrotasks);
 
   // Do a little housekeeping.
   env->process_object()->Delete(
@@ -1079,6 +1091,10 @@ Handle<Value> MakeDomainCallback(Environment* env,
   }
 
   if (tick_info->length() == 0) {
+    env->isolate()->RunMicrotasks();
+  }
+
+  if (tick_info->length() == 0) {
     tick_info->set_index(0);
     return ret;
   }
@@ -1140,6 +1156,10 @@ Handle<Value> MakeCallback(Environment* env,
 
   if (tick_info->in_tick()) {
     return ret;
+  }
+
+  if (tick_info->length() == 0) {
+    env->isolate()->RunMicrotasks();
   }
 
   if (tick_info->length() == 0) {
@@ -1534,13 +1554,14 @@ static Local<Value> ExecuteString(Environment* env,
 
 
 static void GetActiveRequests(const FunctionCallbackInfo<Value>& args) {
-  HandleScope scope(args.GetIsolate());
+  Environment* env = Environment::GetCurrent(args.GetIsolate());
+  HandleScope scope(env->isolate());
 
   Local<Array> ary = Array::New(args.GetIsolate());
   QUEUE* q = NULL;
   int i = 0;
 
-  QUEUE_FOREACH(q, &req_wrap_queue) {
+  QUEUE_FOREACH(q, env->req_wrap_queue()) {
     ReqWrap<uv_req_t>* w = ContainerOf(&ReqWrap<uv_req_t>::req_wrap_queue_, q);
     if (w->persistent().IsEmpty())
       continue;
@@ -1563,7 +1584,7 @@ void GetActiveHandles(const FunctionCallbackInfo<Value>& args) {
 
   Local<String> owner_sym = env->owner_string();
 
-  QUEUE_FOREACH(q, &handle_wrap_queue) {
+  QUEUE_FOREACH(q, env->handle_wrap_queue()) {
     HandleWrap* w = ContainerOf(&HandleWrap::handle_wrap_queue_, q);
     if (w->persistent().IsEmpty() || (w->flags_ & HandleWrap::kUnref))
       continue;
@@ -1938,7 +1959,7 @@ static void InitGroups(const FunctionCallbackInfo<Value>& args) {
 void Exit(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args.GetIsolate());
   HandleScope scope(env->isolate());
-  exit(args[0]->IntegerValue());
+  exit(args[0]->Int32Value());
 }
 
 
@@ -1947,8 +1968,8 @@ static void Uptime(const FunctionCallbackInfo<Value>& args) {
   HandleScope scope(env->isolate());
   double uptime;
 
-  uv_update_time(uv_default_loop());
-  uptime = uv_now(uv_default_loop()) - prog_start_time;
+  uv_update_time(env->event_loop());
+  uptime = uv_now(env->event_loop()) - prog_start_time;
 
   args.GetReturnValue().Set(Number::New(env->isolate(), uptime / 1000));
 }
@@ -1990,7 +2011,7 @@ void Kill(const FunctionCallbackInfo<Value>& args) {
     return env->ThrowError("Bad argument.");
   }
 
-  int pid = args[0]->IntegerValue();
+  int pid = args[0]->Int32Value();
   int sig = args[1]->Int32Value();
   int err = uv_kill(pid, sig);
   args.GetReturnValue().Set(err);
@@ -2499,7 +2520,7 @@ static void DebugPortSetter(Local<String> property,
                             const PropertyCallbackInfo<void>& info) {
   Environment* env = Environment::GetCurrent(info.GetIsolate());
   HandleScope scope(env->isolate());
-  debug_port = value->NumberValue();
+  debug_port = value->Int32Value();
 }
 
 
@@ -2586,7 +2607,7 @@ void StopProfilerIdleNotifier(const FunctionCallbackInfo<Value>& args) {
 
 #define READONLY_PROPERTY(obj, str, var)                                      \
   do {                                                                        \
-    obj->Set(OneByteString(env->isolate(), str), var, v8::ReadOnly);          \
+    obj->ForceSet(OneByteString(env->isolate(), str), var, v8::ReadOnly);     \
   } while (0)
 
 
@@ -2840,8 +2861,11 @@ static void RawDebug(const FunctionCallbackInfo<Value>& args) {
 }
 
 
-void Load(Environment* env) {
+void LoadEnvironment(Environment* env) {
   HandleScope handle_scope(env->isolate());
+
+  V8::SetFatalErrorHandler(node::OnFatalError);
+  V8::AddMessageListener(OnMessage);
 
   // Compile, execute the src/node.js file. (Which was included as static C
   // string in node_natives.h. 'natve_node' is the string containing that
@@ -2949,6 +2973,15 @@ static void PrintHelp() {
          "function is used\n"
          "  --trace-deprecation  show stack traces on deprecations\n"
          "  --v8-options         print v8 command line options\n"
+         "  --max-stack-size=val set max v8 stack size (bytes)\n"
+#if defined(NODE_HAVE_I18N_SUPPORT)
+         "  --icu-data-dir=dir   set ICU data load path to dir\n"
+         "                         (overrides NODE_ICU_DATA)\n"
+#if !defined(NODE_HAVE_SMALL_ICU)
+         "                       Note: linked-in ICU data is\n"
+         "                       present.\n"
+#endif
+#endif
          "\n"
          "Environment variables:\n"
 #ifdef _WIN32
@@ -2960,6 +2993,12 @@ static void PrintHelp() {
          "NODE_MODULE_CONTEXTS   Set to 1 to load modules in their own\n"
          "                       global contexts.\n"
          "NODE_DISABLE_COLORS    Set to 1 to disable colors in the REPL\n"
+#if defined(NODE_HAVE_I18N_SUPPORT)
+         "NODE_ICU_DATA          Data path for ICU (Intl object) data\n"
+#if !defined(NODE_HAVE_SMALL_ICU)
+         "                       (will extend linked-in data)\n"
+#endif
+#endif
          "\n"
          "Documentation can be found at http://nodejs.org/\n");
 }
@@ -3050,6 +3089,10 @@ static void ParseArgs(int* argc,
     } else if (strcmp(arg, "--v8-options") == 0) {
       new_v8_argv[new_v8_argc] = "--help";
       new_v8_argc += 1;
+#if defined(NODE_HAVE_I18N_SUPPORT)
+    } else if (strncmp(arg, "--icu-data-dir=", 15) == 0) {
+      icu_data_dir = arg + 15;
+#endif
     } else {
       // V8 option.  Pass through as-is.
       new_v8_argv[new_v8_argc] = arg;
@@ -3082,40 +3125,33 @@ static void ParseArgs(int* argc,
 
 
 // Called from V8 Debug Agent TCP thread.
-static void DispatchMessagesDebugAgentCallback() {
+static void DispatchMessagesDebugAgentCallback(Environment* env) {
+  // TODO(indutny): move async handle to environment
   uv_async_send(&dispatch_debug_messages_async);
 }
 
 
-// Called from the main thread.
-static void EnableDebug(Isolate* isolate, bool wait_connect) {
-  assert(debugger_running == false);
-  Isolate::Scope isolate_scope(isolate);
-  HandleScope handle_scope(isolate);
-  v8::Debug::SetDebugMessageDispatchHandler(DispatchMessagesDebugAgentCallback,
-                                            false);
-  debugger_running = v8::Debug::EnableAgent("node " NODE_VERSION,
-                                            debug_port,
-                                            wait_connect);
+static void StartDebug(Environment* env, bool wait) {
+  CHECK(!debugger_running);
+
+  env->debugger_agent()->set_dispatch_handler(
+        DispatchMessagesDebugAgentCallback);
+  debugger_running = env->debugger_agent()->Start(debug_port, wait);
   if (debugger_running == false) {
     fprintf(stderr, "Starting debugger on port %d failed\n", debug_port);
     fflush(stderr);
     return;
   }
-  fprintf(stderr, "Debugger listening on port %d\n", debug_port);
-  fflush(stderr);
+}
 
-  if (isolate == NULL)
-    return;  // Still starting up.
-  Local<Context> context = isolate->GetCurrentContext();
-  if (context.IsEmpty())
-    return;  // Still starting up.
-  Environment* env = Environment::GetCurrent(context);
 
-  // Assign environment to the debugger's context
-  env->AssignToContext(v8::Debug::GetDebugContext());
+// Called from the main thread.
+static void EnableDebug(Environment* env) {
+  CHECK(debugger_running);
 
-  Context::Scope context_scope(env->context());
+  // Send message to enable debug in workers
+  HandleScope handle_scope(env->isolate());
+
   Local<Object> message = Object::New(env->isolate());
   message->Set(FIXED_ONE_BYTE_STRING(env->isolate(), "cmd"),
                FIXED_ONE_BYTE_STRING(env->isolate(), "NODE_DEBUG_ENABLED"));
@@ -3124,6 +3160,9 @@ static void EnableDebug(Isolate* isolate, bool wait_connect) {
     message
   };
   MakeCallback(env, env->process_object(), "emit", ARRAY_SIZE(argv), argv);
+
+  // Enabled debugger, possibly making it wait on a semaphore
+  env->debugger_agent()->Enable();
 }
 
 
@@ -3131,7 +3170,12 @@ static void EnableDebug(Isolate* isolate, bool wait_connect) {
 static void DispatchDebugMessagesAsyncCallback(uv_async_t* handle) {
   if (debugger_running == false) {
     fprintf(stderr, "Starting debugger agent.\n");
-    EnableDebug(node_isolate, false);
+
+    Environment* env = Environment::GetCurrent(node_isolate);
+    Context::Scope context_scope(env->context());
+
+    StartDebug(env, false);
+    EnableDebug(env);
   }
   Isolate::Scope isolate_scope(node_isolate);
   v8::Debug::ProcessDebugMessages();
@@ -3360,7 +3404,8 @@ static void DebugPause(const FunctionCallbackInfo<Value>& args) {
 
 static void DebugEnd(const FunctionCallbackInfo<Value>& args) {
   if (debugger_running) {
-    v8::Debug::DisableAgent();
+    Environment* env = Environment::GetCurrent(args.GetIsolate());
+    env->debugger_agent()->Stop();
     debugger_running = false;
   }
 }
@@ -3371,7 +3416,7 @@ void Init(int* argc,
           int* exec_argc,
           const char*** exec_argv) {
   // Initialize prog_start_time to get relative uptime.
-  prog_start_time = uv_now(uv_default_loop());
+  prog_start_time = static_cast<double>(uv_now(uv_default_loop()));
 
   // Make inherited handles noninheritable.
   uv_disable_stdio_inheritance();
@@ -3406,6 +3451,18 @@ void Init(int* argc,
     }
   }
 
+#if defined(NODE_HAVE_I18N_SUPPORT)
+  if (icu_data_dir == NULL) {
+    // if the parameter isn't given, use the env variable.
+    icu_data_dir = getenv("NODE_ICU_DATA");
+  }
+  // Initialize ICU.
+  // If icu_data_dir is NULL here, it will load the 'minimal' data.
+  if (!i18n::InitializeICUDirectory(icu_data_dir)) {
+    FatalError(NULL, "Could not initialize ICU "
+                     "(check NODE_ICU_DATA or --icu-data-dir parameters)");
+  }
+#endif
   // The const_cast doesn't violate conceptual const-ness.  V8 doesn't modify
   // the argv array or the elements it points to.
   V8::SetFlagsFromCommandLine(&v8_argc, const_cast<char**>(v8_argv), true);
@@ -3430,7 +3487,8 @@ void Init(int* argc,
 
   // Fetch a reference to the main isolate, so we have a reference to it
   // even when we need it to access it from another (debugger) thread.
-  node_isolate = Isolate::GetCurrent();
+  node_isolate = Isolate::New();
+  Isolate::Scope isolate_scope(node_isolate);
 
 #ifdef __POSIX__
   // Raise the open file descriptor limit.
@@ -3461,13 +3519,7 @@ void Init(int* argc,
   RegisterSignalHandler(SIGTERM, SignalExit, true);
 #endif  // __POSIX__
 
-  V8::SetFatalErrorHandler(node::OnFatalError);
-  V8::AddMessageListener(OnMessage);
-
-  // If the --debug flag was specified then initialize the debug thread.
-  if (use_debug_agent) {
-    EnableDebug(node_isolate, debug_wait_connect);
-  } else {
+  if (!use_debug_agent) {
     RegisterDebugSignalHandler();
   }
 }
@@ -3526,7 +3578,7 @@ int EmitExit(Environment* env) {
   process_object->Set(env->exiting_string(), True(env->isolate()));
 
   Handle<String> exitCode = env->exit_code_string();
-  int code = process_object->Get(exitCode)->IntegerValue();
+  int code = process_object->Get(exitCode)->Int32Value();
 
   Local<Value> args[] = {
     env->exit_string(),
@@ -3536,11 +3588,50 @@ int EmitExit(Environment* env) {
   MakeCallback(env, process_object, "emit", ARRAY_SIZE(args), args);
 
   // Reload exit code, it may be changed by `emit('exit')`
-  return process_object->Get(exitCode)->IntegerValue();
+  return process_object->Get(exitCode)->Int32Value();
+}
+
+
+// Just a convenience method
+Environment* CreateEnvironment(Isolate* isolate,
+                               Handle<Context> context,
+                               int argc,
+                               const char* const* argv,
+                               int exec_argc,
+                               const char* const* exec_argv) {
+  Environment* env;
+  Context::Scope context_scope(context);
+
+  env = CreateEnvironment(isolate,
+                          uv_default_loop(),
+                          context,
+                          argc,
+                          argv,
+                          exec_argc,
+                          exec_argv);
+
+  LoadEnvironment(env);
+
+  return env;
+}
+
+
+static void HandleCloseCb(uv_handle_t* handle) {
+  Environment* env = reinterpret_cast<Environment*>(handle->data);
+  env->FinishHandleCleanup(handle);
+}
+
+
+static void HandleCleanup(Environment* env,
+                          uv_handle_t* handle,
+                          void* arg) {
+  handle->data = env;
+  uv_close(handle, HandleCloseCb);
 }
 
 
 Environment* CreateEnvironment(Isolate* isolate,
+                               uv_loop_t* loop,
                                Handle<Context> context,
                                int argc,
                                const char* const* argv,
@@ -3549,11 +3640,14 @@ Environment* CreateEnvironment(Isolate* isolate,
   HandleScope handle_scope(isolate);
 
   Context::Scope context_scope(context);
-  Environment* env = Environment::New(context);
+  Environment* env = Environment::New(context, loop);
+
+  isolate->SetAutorunMicrotasks(false);
 
   uv_check_init(env->event_loop(), env->immediate_check_handle());
   uv_unref(
       reinterpret_cast<uv_handle_t*>(env->immediate_check_handle()));
+
   uv_idle_init(env->event_loop(), env->immediate_idle_handle());
 
   // Inform V8's CPU profiler when we're idle.  The profiler is sampling-based
@@ -3570,6 +3664,24 @@ Environment* CreateEnvironment(Isolate* isolate,
   uv_unref(reinterpret_cast<uv_handle_t*>(env->idle_prepare_handle()));
   uv_unref(reinterpret_cast<uv_handle_t*>(env->idle_check_handle()));
 
+  // Register handle cleanups
+  env->RegisterHandleCleanup(
+      reinterpret_cast<uv_handle_t*>(env->immediate_check_handle()),
+      HandleCleanup,
+      NULL);
+  env->RegisterHandleCleanup(
+      reinterpret_cast<uv_handle_t*>(env->immediate_idle_handle()),
+      HandleCleanup,
+      NULL);
+  env->RegisterHandleCleanup(
+      reinterpret_cast<uv_handle_t*>(env->idle_prepare_handle()),
+      HandleCleanup,
+      NULL);
+  env->RegisterHandleCleanup(
+      reinterpret_cast<uv_handle_t*>(env->idle_check_handle()),
+      HandleCleanup,
+      NULL);
+
   if (v8_is_profiling) {
     StartProfilerIdleNotifier(env);
   }
@@ -3581,7 +3693,6 @@ Environment* CreateEnvironment(Isolate* isolate,
   env->set_process_object(process_object);
 
   SetupProcessObject(env, argc, argv, exec_argc, exec_argv);
-  Load(env);
 
   return env;
 }
@@ -3623,34 +3734,41 @@ int Start(int argc, char** argv) {
     HandleScope handle_scope(node_isolate);
     Local<Context> context = Context::New(node_isolate);
     Environment* env = CreateEnvironment(
-        node_isolate, context, argc, argv, exec_argc, exec_argv);
-    // Assign env to the debugger's context
-    if (debugger_running) {
-      HandleScope scope(env->isolate());
-      env->AssignToContext(v8::Debug::GetDebugContext());
-    }
-    // This Context::Scope is here so EnableDebug() can look up the current
-    // environment with Environment::GetCurrent().
-    // TODO(bnoordhuis) Reorder the debugger initialization logic so it can
-    // be removed.
-    {
-      Context::Scope context_scope(env->context());
-      bool more;
-      do {
-        more = uv_run(env->event_loop(), UV_RUN_ONCE);
-        if (more == false) {
-          EmitBeforeExit(env);
+        node_isolate,
+        uv_default_loop(),
+        context,
+        argc,
+        argv,
+        exec_argc,
+        exec_argv);
+    Context::Scope context_scope(context);
 
-          // Emit `beforeExit` if the loop became alive either after emitting
-          // event, or after running some callbacks.
-          more = uv_loop_alive(env->event_loop());
-          if (uv_run(env->event_loop(), UV_RUN_NOWAIT) != 0)
-            more = true;
-        }
-      } while (more == true);
-      code = EmitExit(env);
-      RunAtExit(env);
-    }
+    // Start debug agent when argv has --debug
+    if (use_debug_agent)
+      StartDebug(env, debug_wait_connect);
+
+    LoadEnvironment(env);
+
+    // Enable debugger
+    if (use_debug_agent)
+      EnableDebug(env);
+
+    bool more;
+    do {
+      more = uv_run(env->event_loop(), UV_RUN_ONCE);
+      if (more == false) {
+        EmitBeforeExit(env);
+
+        // Emit `beforeExit` if the loop became alive either after emitting
+        // event, or after running some callbacks.
+        more = uv_loop_alive(env->event_loop());
+        if (uv_run(env->event_loop(), UV_RUN_NOWAIT) != 0)
+          more = true;
+      }
+    } while (more == true);
+    code = EmitExit(env);
+    RunAtExit(env);
+
     env->Dispose();
     env = NULL;
   }
