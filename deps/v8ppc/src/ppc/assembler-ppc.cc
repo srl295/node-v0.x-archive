@@ -38,31 +38,18 @@
 // Copyright IBM Corp. 2012, 2013. All rights reserved.
 //
 
-#include "v8.h"
+#include "src/v8.h"
 
 #if V8_TARGET_ARCH_PPC
 
-#include "ppc/assembler-ppc-inl.h"
-#include "macro-assembler.h"
-#include "serialize.h"
+#include "src/base/cpu.h"
+#include "src/ppc/assembler-ppc-inl.h"
+
+#include "src/macro-assembler.h"
+#include "src/serialize.h"
 
 namespace v8 {
 namespace internal {
-
-#ifdef DEBUG
-bool CpuFeatures::initialized_ = false;
-#endif
-unsigned CpuFeatures::supported_ = 0;
-unsigned CpuFeatures::found_by_runtime_probing_only_ = 0;
-unsigned CpuFeatures::cross_compile_ = 0;
-unsigned CpuFeatures::cache_line_size_log2_ = 7;  // 128
-
-
-ExternalReference ExternalReference::cpu_features() {
-  ASSERT(CpuFeatures::initialized_);
-  return ExternalReference(&CpuFeatures::supported_);
-}
-
 
 // Get the CPU features enabled by the build.
 static unsigned CpuFeaturesImpliedByCompiler() {
@@ -71,53 +58,49 @@ static unsigned CpuFeaturesImpliedByCompiler() {
 }
 
 
-void CpuFeatures::Probe(bool serializer_enabled) {
-  unsigned standard_features = static_cast<unsigned>(
-      OS::CpuFeaturesImpliedByPlatform()) | CpuFeaturesImpliedByCompiler();
-  ASSERT(supported_ == 0 ||
-         (supported_ & standard_features) == standard_features);
-#ifdef DEBUG
-  initialized_ = true;
-#endif
+void CpuFeatures::ProbeImpl(bool cross_compile) {
+  supported_ |= CpuFeaturesImpliedByCompiler();
+  cache_line_size_ = 128;
 
-  // Get the features implied by the OS and the compiler settings. This is the
-  // minimal set of features which is also alowed for generated code in the
-  // snapshot.
-  supported_ |= standard_features;
-
-  if (serializer_enabled) {
-    // No probing for features if we might serialize (generate snapshot).
-    return;
-  }
+  // Only use statically determined features for cross compile (snapshot).
+  if (cross_compile) return;
 
   // Detect whether frim instruction is supported (POWER5+)
   // For now we will just check for processors we know do not
   // support it
 #ifndef USE_SIMULATOR
   // Probe for additional features at runtime.
-  CPU cpu;
+  base::CPU cpu;
 #if V8_TARGET_ARCH_PPC64
-  if (cpu.part() == CPU::PPC_POWER8) {
+  if (cpu.part() == base::CPU::PPC_POWER8) {
     supported_ |= (1u << FPR_GPR_MOV);
   }
 #endif
+  if (cpu.part() == base::CPU::PPC_POWER6 ||
+      cpu.part() == base::CPU::PPC_POWER7 ||
+      cpu.part() == base::CPU::PPC_POWER8) {
+    supported_ |= (1u << LWSYNC);
+  }
+  if (cpu.part() == base::CPU::PPC_POWER7 ||
+      cpu.part() == base::CPU::PPC_POWER8) {
+    supported_ |= (1u << ISELECT);
+  }
 #if V8_OS_LINUX
-  if (!(cpu.part() == CPU::PPC_G5 || cpu.part() == CPU::PPC_G4)) {
+  if (!(cpu.part() == base::CPU::PPC_G5 || cpu.part() == base::CPU::PPC_G4)) {
     // Assume support
     supported_ |= (1u << FPU);
   }
-  if (cpu.part() == CPU::PPC_POWER6 ||
-      cpu.part() == CPU::PPC_POWER7 ||
-      cpu.part() == CPU::PPC_POWER8) {
-    supported_ |= (1u << LWSYNC);
+  if (cpu.cache_line_size() != 0) {
+    cache_line_size_ = cpu.cache_line_size();
   }
 #elif V8_OS_AIX
   // Assume support FP support and default cache line size
   supported_ |= (1u << FPU);
-  supported_ |= (1u << LWSYNC);
 #endif
 #else  // Simulator
   supported_ |= (1u << FPU);
+  supported_ |= (1u << LWSYNC);
+  supported_ |= (1u << ISELECT);
 #if V8_TARGET_ARCH_PPC64
   supported_ |= (1u << FPR_GPR_MOV);
 #endif
@@ -144,7 +127,7 @@ void CpuFeatures::PrintFeatures() {
 
 
 Register ToRegister(int num) {
-  ASSERT(num >= 0 && num < kNumRegisters);
+  DCHECK(num >= 0 && num < kNumRegisters);
   const Register kRegisters[] = {
     r0,
     sp,
@@ -158,7 +141,7 @@ Register ToRegister(int num) {
 
 
 const char* DoubleRegister::AllocationIndexToString(int index) {
-  ASSERT(index >= 0 && index < kMaxNumAllocatableRegisters);
+  DCHECK(index >= 0 && index < kMaxNumAllocatableRegisters);
   const char* const names[] = {
     "d1", "d2", "d3", "d4", "d5", "d6", "d7", "d8", "d9", "d10", "d11", "d12",
     "d15", "d16", "d17", "d18", "d19", "d20", "d21", "d22", "d23", "d24", "d25",
@@ -201,7 +184,7 @@ void RelocInfo::PatchCode(byte* instructions, int instruction_count) {
   }
 
   // Indicate that code has changed.
-  CPU::FlushICache(pc_, instruction_count * Assembler::kInstrSize);
+  CpuFeatures::FlushICache(pc_, instruction_count * Assembler::kInstrSize);
 }
 
 
@@ -223,7 +206,7 @@ Operand::Operand(Handle<Object> handle) {
   // Verify all Objects referred by code are NOT in new space.
   Object* obj = *handle;
   if (obj->IsHeapObject()) {
-    ASSERT(!HeapObject::cast(obj)->GetHeap()->InNewSpace(obj));
+    DCHECK(!HeapObject::cast(obj)->GetHeap()->InNewSpace(obj));
     imm_ = reinterpret_cast<intptr_t>(handle.location());
     rmode_ = RelocInfo::EMBEDDED_OBJECT;
   } else {
@@ -278,7 +261,6 @@ Assembler::Assembler(Isolate* isolate, void* buffer, int buffer_size)
 
 #if V8_OOL_CONSTANT_POOL
   constant_pool_available_ = false;
-  constant_pool_full_ = false;
 #endif
 
   ClearRecordedAstId();
@@ -296,7 +278,7 @@ void Assembler::GetCode(CodeDesc* desc) {
 
 
 void Assembler::Align(int m) {
-  ASSERT(m >= 4 && IsPowerOf2(m));
+  DCHECK(m >= 4 && IsPowerOf2(m));
   while ((pc_offset() & (m - 1)) != 0) {
     nop();
   }
@@ -316,7 +298,7 @@ Condition Assembler::GetCondition(Instr instr) {
       return ne;
     default:
       UNIMPLEMENTED();
-    }
+  }
   return al;
 }
 
@@ -416,13 +398,13 @@ bool Assembler::IsCrSet(Instr instr) {
 
 
 Register Assembler::GetCmpImmediateRegister(Instr instr) {
-  ASSERT(IsCmpImmediate(instr));
+  DCHECK(IsCmpImmediate(instr));
   return GetRA(instr);
 }
 
 
 int Assembler::GetCmpImmediateRawImmediate(Instr instr) {
-  ASSERT(IsCmpImmediate(instr));
+  DCHECK(IsCmpImmediate(instr));
   return instr & kOff16Mask;
 }
 
@@ -469,7 +451,7 @@ int Assembler::target_at(int pos)  {
   }
 
   PPCPORT_UNIMPLEMENTED();
-  ASSERT(false);
+  DCHECK(false);
   return -1;
 }
 
@@ -481,26 +463,26 @@ void Assembler::target_at_put(int pos, int target_pos) {
   // check which type of branch this is 16 or 26 bit offset
   if (BX == opcode) {
     int imm26 = target_pos - pos;
-    ASSERT((imm26 & (kAAMask|kLKMask)) == 0);
+    DCHECK((imm26 & (kAAMask|kLKMask)) == 0);
     instr &= ((~kImm26Mask)|kAAMask|kLKMask);
-    ASSERT(is_int26(imm26));
+    DCHECK(is_int26(imm26));
     instr_at_put(pos, instr | (imm26 & kImm26Mask));
     return;
   } else if (BCX == opcode) {
     int imm16 = target_pos - pos;
-    ASSERT((imm16 & (kAAMask|kLKMask)) == 0);
+    DCHECK((imm16 & (kAAMask|kLKMask)) == 0);
     instr &= ((~kImm16Mask)|kAAMask|kLKMask);
-    ASSERT(is_int16(imm16));
+    DCHECK(is_int16(imm16));
     instr_at_put(pos, instr | (imm16 & kImm16Mask));
     return;
   } else if ((instr & ~kImm26Mask) == 0) {
-    ASSERT(target_pos == kEndOfChain || target_pos >= 0);
+    DCHECK(target_pos == kEndOfChain || target_pos >= 0);
     // Emitted link to a label, not part of a branch (regexp PushBacktrack).
     // Load the position of the label relative to the generated code object
     // pointer in a register.
 
     Register dst = r3;  // we assume r3 for now
-    ASSERT(IsNop(instr_at(pos + kInstrSize)));
+    DCHECK(IsNop(instr_at(pos + kInstrSize)));
     uint32_t target = target_pos + (Code::kHeaderSize - kHeapObjectTag);
     CodePatcher patcher(reinterpret_cast<byte*>(buffer_ + pos),
                         2,
@@ -513,7 +495,7 @@ void Assembler::target_at_put(int pos, int target_pos) {
     return;
   }
 
-  ASSERT(false);
+  DCHECK(false);
 }
 
 
@@ -531,13 +513,13 @@ int Assembler::max_reach_from(int pos) {
     return 26;
   }
 
-  ASSERT(false);
+  DCHECK(false);
   return 0;
 }
 
 
 void Assembler::bind_to(Label* L, int pos) {
-  ASSERT(0 <= pos && pos <= pc_offset());  // must have a valid binding position
+  DCHECK(0 <= pos && pos <= pc_offset());  // must have a valid binding position
   int32_t trampoline_pos = kInvalidSlotPos;
   if (L->is_linked() && !trampoline_emitted_) {
     unbound_labels_count_--;
@@ -570,26 +552,26 @@ void Assembler::bind_to(Label* L, int pos) {
 
 
 void Assembler::bind(Label* L) {
-  ASSERT(!L->is_bound());  // label can only be bound once
+  DCHECK(!L->is_bound());  // label can only be bound once
   bind_to(L, pc_offset());
 }
 
 
 
 void Assembler::next(Label* L) {
-  ASSERT(L->is_linked());
+  DCHECK(L->is_linked());
   int link = target_at(L->pos());
   if (link == kEndOfChain) {
     L->Unuse();
   } else {
-    ASSERT(link >= 0);
+    DCHECK(link >= 0);
     L->link_to(link);
   }
 }
 
 
 bool Assembler::is_near(Label* L, Condition cond) {
-  ASSERT(L->is_bound());
+  DCHECK(L->is_bound());
   if (L->is_bound() == false)
     return false;
 
@@ -618,14 +600,14 @@ void Assembler::d_form(Instr instr,
     if (!is_int16(val)) {
       PrintF("val = %" V8PRIdPTR ", 0x%" V8PRIxPTR "\n", val, val);
     }
-    ASSERT(is_int16(val));
+    DCHECK(is_int16(val));
   } else {
     if (!is_uint16(val)) {
       PrintF("val = %" V8PRIdPTR ", 0x%" V8PRIxPTR
              ", is_unsigned_imm16(val)=%d, kImm16Mask=0x%x\n",
              val, val, is_uint16(val), kImm16Mask);
     }
-    ASSERT(is_uint16(val));
+    DCHECK(is_uint16(val));
   }
   emit(instr | rt.code()*B21 | ra.code()*B16 | (kImm16Mask & val));
 }
@@ -756,7 +738,7 @@ void Assembler::bc(int branch_offset, BOfield bo, int condition_bit, LKBit lk) {
   if (lk == SetLK) {
     positions_recorder()->WriteRecordedPositions();
   }
-  ASSERT(is_int16(branch_offset));
+  DCHECK(is_int16(branch_offset));
   emit(BCX | bo | condition_bit*B16 | (kImm16Mask & branch_offset) | lk);
 }
 
@@ -765,9 +747,9 @@ void Assembler::b(int branch_offset, LKBit lk) {
   if (lk == SetLK) {
     positions_recorder()->WriteRecordedPositions();
   }
-  ASSERT((branch_offset & 3) == 0);
+  DCHECK((branch_offset & 3) == 0);
   int imm26 = branch_offset;
-  ASSERT(is_int26(imm26));
+  DCHECK(is_int26(imm26));
   // todo add AA and LK bits
   emit(BX | (imm26 & kImm26Mask) | lk);
 }
@@ -827,28 +809,28 @@ void Assembler::rlwimi(Register ra, Register rs,
 
 void Assembler::slwi(Register dst, Register src, const Operand& val,
                      RCBit rc) {
-  ASSERT((32 > val.imm_)&&(val.imm_ >= 0));
+  DCHECK((32 > val.imm_) && (val.imm_ >= 0));
   rlwinm(dst, src, val.imm_, 0, 31-val.imm_, rc);
 }
 
 
 void Assembler::srwi(Register dst, Register src, const Operand& val,
                      RCBit rc) {
-  ASSERT((32 > val.imm_)&&(val.imm_ >= 0));
+  DCHECK((32 > val.imm_) && (val.imm_ >= 0));
   rlwinm(dst, src, 32-val.imm_, val.imm_, 31, rc);
 }
 
 
 void Assembler::clrrwi(Register dst, Register src, const Operand& val,
                        RCBit rc) {
-  ASSERT((32 > val.imm_)&&(val.imm_ >= 0));
+  DCHECK((32 > val.imm_) && (val.imm_ >= 0));
   rlwinm(dst, src, 0, 0, 31-val.imm_, rc);
 }
 
 
 void Assembler::clrlwi(Register dst, Register src, const Operand& val,
                        RCBit rc) {
-  ASSERT((32 > val.imm_)&&(val.imm_ >= 0));
+  DCHECK((32 > val.imm_) && (val.imm_ >= 0));
   rlwinm(dst, src, 0, val.imm_, 31, rc);
 }
 
@@ -949,13 +931,13 @@ void Assembler::divw(Register dst, Register src1, Register src2,
 
 
 void Assembler::addi(Register dst, Register src, const Operand& imm) {
-  ASSERT(!src.is(r0));  // use li instead to show intent
+  DCHECK(!src.is(r0));  // use li instead to show intent
   d_form(ADDI, dst, src, imm.imm_, true);
 }
 
 
 void  Assembler::addis(Register dst, Register src, const Operand& imm) {
-  ASSERT(!src.is(r0));  // use lis instead to show intent
+  DCHECK(!src.is(r0));  // use lis instead to show intent
   d_form(ADDIS, dst, src, imm.imm_, true);
 }
 
@@ -1007,8 +989,8 @@ void Assembler::cmpi(Register src1, const Operand& src2, CRegister cr) {
 #else
   int L = 0;
 #endif
-  ASSERT(is_int16(imm16));
-  ASSERT(cr.code() >= 0 && cr.code() <= 7);
+  DCHECK(is_int16(imm16));
+  DCHECK(cr.code() >= 0 && cr.code() <= 7);
   imm16 &= kImm16Mask;
   emit(CMPI | cr.code()*B23 | L*B21 | src1.code()*B16 | imm16);
 }
@@ -1021,8 +1003,8 @@ void Assembler::cmpli(Register src1, const Operand& src2, CRegister cr) {
 #else
   int L = 0;
 #endif
-  ASSERT(is_uint16(uimm16));
-  ASSERT(cr.code() >= 0 && cr.code() <= 7);
+  DCHECK(is_uint16(uimm16));
+  DCHECK(cr.code() >= 0 && cr.code() <= 7);
   uimm16 &= kImm16Mask;
   emit(CMPLI | cr.code()*B23 | L*B21 | src1.code()*B16 | uimm16);
 }
@@ -1034,7 +1016,7 @@ void Assembler::cmp(Register src1, Register src2, CRegister cr) {
 #else
   int L = 0;
 #endif
-  ASSERT(cr.code() >= 0 && cr.code() <= 7);
+  DCHECK(cr.code() >= 0 && cr.code() <= 7);
   emit(EXT2 | CMP | cr.code()*B23 | L*B21 | src1.code()*B16 |
        src2.code()*B11);
 }
@@ -1046,7 +1028,7 @@ void Assembler::cmpl(Register src1, Register src2, CRegister cr) {
 #else
   int L = 0;
 #endif
-  ASSERT(cr.code() >= 0 && cr.code() <= 7);
+  DCHECK(cr.code() >= 0 && cr.code() <= 7);
   emit(EXT2 | CMPL | cr.code()*B23 | L*B21 | src1.code()*B16 |
        src2.code()*B11);
 }
@@ -1055,8 +1037,8 @@ void Assembler::cmpl(Register src1, Register src2, CRegister cr) {
 void Assembler::cmpwi(Register src1, const Operand& src2, CRegister cr) {
   intptr_t imm16 = src2.imm_;
   int L = 0;
-  ASSERT(is_int16(imm16));
-  ASSERT(cr.code() >= 0 && cr.code() <= 7);
+  DCHECK(is_int16(imm16));
+  DCHECK(cr.code() >= 0 && cr.code() <= 7);
   imm16 &= kImm16Mask;
   emit(CMPI | cr.code()*B23 | L*B21 | src1.code()*B16 | imm16);
 }
@@ -1065,8 +1047,8 @@ void Assembler::cmpwi(Register src1, const Operand& src2, CRegister cr) {
 void Assembler::cmplwi(Register src1, const Operand& src2, CRegister cr) {
   uintptr_t uimm16 = src2.imm_;
   int L = 0;
-  ASSERT(is_uint16(uimm16));
-  ASSERT(cr.code() >= 0 && cr.code() <= 7);
+  DCHECK(is_uint16(uimm16));
+  DCHECK(cr.code() >= 0 && cr.code() <= 7);
   uimm16 &= kImm16Mask;
   emit(CMPLI | cr.code()*B23 | L*B21 | src1.code()*B16 | uimm16);
 }
@@ -1074,7 +1056,7 @@ void Assembler::cmplwi(Register src1, const Operand& src2, CRegister cr) {
 
 void Assembler::cmpw(Register src1, Register src2, CRegister cr) {
   int L = 0;
-  ASSERT(cr.code() >= 0 && cr.code() <= 7);
+  DCHECK(cr.code() >= 0 && cr.code() <= 7);
   emit(EXT2 | CMP | cr.code()*B23 | L*B21 | src1.code()*B16 |
        src2.code()*B11);
 }
@@ -1082,9 +1064,14 @@ void Assembler::cmpw(Register src1, Register src2, CRegister cr) {
 
 void Assembler::cmplw(Register src1, Register src2, CRegister cr) {
   int L = 0;
-  ASSERT(cr.code() >= 0 && cr.code() <= 7);
+  DCHECK(cr.code() >= 0 && cr.code() <= 7);
   emit(EXT2 | CMPL | cr.code()*B23 | L*B21 | src1.code()*B16 |
        src2.code()*B11);
+}
+
+
+void Assembler::isel(Register rt, Register ra, Register rb, int cb) {
+  emit(EXT2 | ISEL | rt.code()*B21 | ra.code()*B16 | rb.code()*B11 | cb*B6);
 }
 
 
@@ -1107,7 +1094,7 @@ void Assembler::mr(Register dst, Register src) {
 
 
 void Assembler::lbz(Register dst, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0));
+  DCHECK(!src.ra_.is(r0));
   d_form(LBZ, dst, src.ra(), src.offset(), true);
 }
 
@@ -1115,7 +1102,7 @@ void Assembler::lbz(Register dst, const MemOperand &src) {
 void Assembler::lbzx(Register rt, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | LBZX | rt.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
@@ -1123,13 +1110,13 @@ void Assembler::lbzx(Register rt, const MemOperand &src) {
 void Assembler::lbzux(Register rt, const MemOperand & src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | LBZUX | rt.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
 
 void Assembler::lhz(Register dst, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0));
+  DCHECK(!src.ra_.is(r0));
   d_form(LHZ, dst, src.ra(), src.offset(), true);
 }
 
@@ -1137,7 +1124,7 @@ void Assembler::lhz(Register dst, const MemOperand &src) {
 void Assembler::lhzx(Register rt, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | LHZX | rt.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
@@ -1145,19 +1132,19 @@ void Assembler::lhzx(Register rt, const MemOperand &src) {
 void Assembler::lhzux(Register rt, const MemOperand & src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | LHZUX | rt.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
 
 void Assembler::lwz(Register dst, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0));
+  DCHECK(!src.ra_.is(r0));
   d_form(LWZ, dst, src.ra(), src.offset(), true);
 }
 
 
 void Assembler::lwzu(Register dst, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0));
+  DCHECK(!src.ra_.is(r0));
   d_form(LWZU, dst, src.ra(), src.offset(), true);
 }
 
@@ -1165,7 +1152,7 @@ void Assembler::lwzu(Register dst, const MemOperand &src) {
 void Assembler::lwzx(Register rt, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | LWZX | rt.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
@@ -1173,7 +1160,7 @@ void Assembler::lwzx(Register rt, const MemOperand &src) {
 void Assembler::lwzux(Register rt, const MemOperand & src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | LWZUX | rt.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
@@ -1181,8 +1168,8 @@ void Assembler::lwzux(Register rt, const MemOperand & src) {
 void Assembler::lwa(Register dst, const MemOperand &src) {
 #if V8_TARGET_ARCH_PPC64
   int offset = src.offset();
-  ASSERT(!src.ra_.is(r0));
-  ASSERT(!(offset & 3) && is_int16(offset));
+  DCHECK(!src.ra_.is(r0));
+  DCHECK(!(offset & 3) && is_int16(offset));
   offset = kImm16Mask & offset;
   emit(LD | dst.code()*B21 | src.ra().code()*B16 | offset | 2);
 #else
@@ -1192,7 +1179,7 @@ void Assembler::lwa(Register dst, const MemOperand &src) {
 
 
 void Assembler::stb(Register dst, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0));
+  DCHECK(!src.ra_.is(r0));
   d_form(STB, dst, src.ra(), src.offset(), true);
 }
 
@@ -1200,7 +1187,7 @@ void Assembler::stb(Register dst, const MemOperand &src) {
 void Assembler::stbx(Register rs, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | STBX | rs.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
@@ -1208,13 +1195,13 @@ void Assembler::stbx(Register rs, const MemOperand &src) {
 void Assembler::stbux(Register rs, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | STBUX | rs.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
 
 void Assembler::sth(Register dst, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0));
+  DCHECK(!src.ra_.is(r0));
   d_form(STH, dst, src.ra(), src.offset(), true);
 }
 
@@ -1222,7 +1209,7 @@ void Assembler::sth(Register dst, const MemOperand &src) {
 void Assembler::sthx(Register rs, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | STHX | rs.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
@@ -1230,19 +1217,19 @@ void Assembler::sthx(Register rs, const MemOperand &src) {
 void Assembler::sthux(Register rs, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | STHUX | rs.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
 
 void Assembler::stw(Register dst, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0));
+  DCHECK(!src.ra_.is(r0));
   d_form(STW, dst, src.ra(), src.offset(), true);
 }
 
 
 void Assembler::stwu(Register dst, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0));
+  DCHECK(!src.ra_.is(r0));
   d_form(STWU, dst, src.ra(), src.offset(), true);
 }
 
@@ -1250,7 +1237,7 @@ void Assembler::stwu(Register dst, const MemOperand &src) {
 void Assembler::stwx(Register rs, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | STWX | rs.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
@@ -1258,7 +1245,7 @@ void Assembler::stwx(Register rs, const MemOperand &src) {
 void Assembler::stwux(Register rs, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | STWUX | rs.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
@@ -1287,8 +1274,8 @@ void Assembler::andc(Register dst, Register src1, Register src2, RCBit rc) {
 // 64bit specific instructions
 void Assembler::ld(Register rd, const MemOperand &src) {
   int offset = src.offset();
-  ASSERT(!src.ra_.is(r0));
-  ASSERT(!(offset & 3) && is_int16(offset));
+  DCHECK(!src.ra_.is(r0));
+  DCHECK(!(offset & 3) && is_int16(offset));
   offset = kImm16Mask & offset;
   emit(LD | rd.code()*B21 | src.ra().code()*B16 | offset);
 }
@@ -1297,15 +1284,15 @@ void Assembler::ld(Register rd, const MemOperand &src) {
 void Assembler::ldx(Register rd, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | LDX | rd.code()*B21 | ra.code()*B16 | rb.code()*B11);
 }
 
 
 void Assembler::ldu(Register rd, const MemOperand &src) {
   int offset = src.offset();
-  ASSERT(!src.ra_.is(r0));
-  ASSERT(!(offset & 3) && is_int16(offset));
+  DCHECK(!src.ra_.is(r0));
+  DCHECK(!(offset & 3) && is_int16(offset));
   offset = kImm16Mask & offset;
   emit(LD | rd.code()*B21 | src.ra().code()*B16 | offset | 1);
 }
@@ -1314,15 +1301,15 @@ void Assembler::ldu(Register rd, const MemOperand &src) {
 void Assembler::ldux(Register rd, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | LDUX | rd.code()*B21 | ra.code()*B16 | rb.code()*B11);
 }
 
 
 void Assembler::std(Register rs, const MemOperand &src) {
   int offset = src.offset();
-  ASSERT(!src.ra_.is(r0));
-  ASSERT(!(offset & 3) && is_int16(offset));
+  DCHECK(!src.ra_.is(r0));
+  DCHECK(!(offset & 3) && is_int16(offset));
   offset = kImm16Mask & offset;
   emit(STD | rs.code()*B21 | src.ra().code()*B16 | offset);
 }
@@ -1331,15 +1318,15 @@ void Assembler::std(Register rs, const MemOperand &src) {
 void Assembler::stdx(Register rs, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | STDX | rs.code()*B21 | ra.code()*B16 | rb.code()*B11);
 }
 
 
 void Assembler::stdu(Register rs, const MemOperand &src) {
   int offset = src.offset();
-  ASSERT(!src.ra_.is(r0));
-  ASSERT(!(offset & 3) && is_int16(offset));
+  DCHECK(!src.ra_.is(r0));
+  DCHECK(!(offset & 3) && is_int16(offset));
   offset = kImm16Mask & offset;
   emit(STD | rs.code()*B21 | src.ra().code()*B16 | offset | 1);
 }
@@ -1348,7 +1335,7 @@ void Assembler::stdu(Register rs, const MemOperand &src) {
 void Assembler::stdux(Register rs, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | STDUX | rs.code()*B21 | ra.code()*B16 | rb.code()*B11);
 }
 
@@ -1375,28 +1362,28 @@ void Assembler::rldicr(Register ra, Register rs, int sh, int me, RCBit r) {
 
 void Assembler::sldi(Register dst, Register src, const Operand& val,
                      RCBit rc) {
-  ASSERT((64 > val.imm_)&&(val.imm_ >= 0));
+  DCHECK((64 > val.imm_) && (val.imm_ >= 0));
   rldicr(dst, src, val.imm_, 63-val.imm_, rc);
 }
 
 
 void Assembler::srdi(Register dst, Register src, const Operand& val,
                      RCBit rc) {
-  ASSERT((64 > val.imm_)&&(val.imm_ >= 0));
+  DCHECK((64 > val.imm_) && (val.imm_ >= 0));
   rldicl(dst, src, 64-val.imm_, val.imm_, rc);
 }
 
 
 void Assembler::clrrdi(Register dst, Register src, const Operand& val,
                        RCBit rc) {
-  ASSERT((64 > val.imm_)&&(val.imm_ >= 0));
+  DCHECK((64 > val.imm_) && (val.imm_ >= 0));
   rldicr(dst, src, 0, 63-val.imm_, rc);
 }
 
 
 void Assembler::clrldi(Register dst, Register src, const Operand& val,
                        RCBit rc) {
-  ASSERT((64 > val.imm_)&&(val.imm_ >= 0));
+  DCHECK((64 > val.imm_) && (val.imm_ >= 0));
   rldicl(dst, src, 0, val.imm_, rc);
 }
 
@@ -1468,14 +1455,14 @@ void Assembler::divd(Register dst, Register src1, Register src2,
 
 
 void Assembler::fake_asm(enum FAKE_OPCODE_T fopcode) {
-  ASSERT(fopcode < fLastFaker);
+  DCHECK(fopcode < fLastFaker);
   emit(FAKE_OPCODE | FAKER_SUBOPCODE | fopcode);
 }
 
 
 void Assembler::marker_asm(int mcode) {
   if (::v8::internal::FLAG_trace_sim_stubs) {
-    ASSERT(mcode < F_NEXT_AVAILABLE_STUB_MARKER);
+    DCHECK(mcode < F_NEXT_AVAILABLE_STUB_MARKER);
     emit(FAKE_OPCODE | MARKER_SUBOPCODE | mcode);
   }
 }
@@ -1485,7 +1472,7 @@ void Assembler::marker_asm(int mcode) {
 // Code address skips the function descriptor "header".
 // TOC and static chain are ignored and set to 0.
 void Assembler::function_descriptor() {
-  ASSERT(pc_offset() == 0);
+  DCHECK(pc_offset() == 0);
   RecordRelocInfo(RelocInfo::INTERNAL_REFERENCE);
   emit_ptr(reinterpret_cast<uintptr_t>(pc_) + 3 * kPointerSize);
   emit_ptr(0);
@@ -1496,8 +1483,9 @@ void Assembler::function_descriptor() {
 #if ABI_USES_FUNCTION_DESCRIPTORS || V8_OOL_CONSTANT_POOL
 void Assembler::RelocateInternalReference(Address pc,
                                           intptr_t delta,
-                                          Address code_start) {
-  ASSERT(delta || code_start);
+                                          Address code_start,
+                                          ICacheFlushMode icache_flush_mode) {
+  DCHECK(delta || code_start);
 #if ABI_USES_FUNCTION_DESCRIPTORS
   uintptr_t *fd = reinterpret_cast<uintptr_t*>(pc);
   if (fd[1] == 0 && fd[2] == 0) {
@@ -1516,7 +1504,7 @@ void Assembler::RelocateInternalReference(Address pc,
   if (delta) {
     code_start = target_address_at(pc, constant_pool) + delta;
   }
-  set_target_address_at(pc, constant_pool, code_start);
+  set_target_address_at(pc, constant_pool, code_start, icache_flush_mode);
 #endif
 }
 
@@ -1526,16 +1514,71 @@ int Assembler::DecodeInternalReference(Vector<char> buffer, Address pc) {
   uintptr_t *fd = reinterpret_cast<uintptr_t*>(pc);
   if (fd[1] == 0 && fd[2] == 0) {
     // Function descriptor
-    OS::SNPrintF(buffer,
-                 "[%08" V8PRIxPTR ", %08" V8PRIxPTR ", %08" V8PRIxPTR "]"
-                 "   function descriptor",
-                 fd[0], fd[1], fd[2]);
+    SNPrintF(buffer,
+             "[%08" V8PRIxPTR ", %08" V8PRIxPTR ", %08" V8PRIxPTR "]"
+             "   function descriptor",
+             fd[0], fd[1], fd[2]);
     return kPointerSize * 3;
   }
 #endif
   return 0;
 }
 #endif
+
+
+int Assembler::instructions_required_for_mov(const Operand& x) const {
+#if V8_OOL_CONSTANT_POOL || DEBUG
+  bool canOptimize = !(x.must_output_reloc_info(this) ||
+                       is_trampoline_pool_blocked());
+#endif
+#if V8_OOL_CONSTANT_POOL
+  if (use_constant_pool_for_mov(x, canOptimize)) {
+    // Current usage guarantees that all constant pool references can
+    // use the same sequence.
+    return kMovInstructionsConstantPool;
+  }
+#endif
+  DCHECK(!canOptimize);
+  return kMovInstructionsNoConstantPool;
+}
+
+
+#if V8_OOL_CONSTANT_POOL
+bool Assembler::use_constant_pool_for_mov(const Operand& x,
+                                          bool canOptimize) const {
+  if (!is_constant_pool_available() || is_constant_pool_full()) {
+    // If there is no constant pool available, we must use a mov
+    // immediate sequence.
+    return false;
+  }
+
+  intptr_t value = x.immediate();
+  if (canOptimize && is_int16(value)) {
+    // Prefer a single-instruction load-immediate.
+    return false;
+  }
+
+  return true;
+}
+
+
+void Assembler::EnsureSpaceFor(int space_needed) {
+  if (buffer_space() <= (kGap + space_needed)) {
+    GrowBuffer();
+  }
+}
+#endif
+
+
+bool Operand::must_output_reloc_info(const Assembler* assembler) const {
+  if (rmode_ == RelocInfo::EXTERNAL_REFERENCE) {
+    if (assembler != NULL && assembler->predictable_code_size()) return true;
+    return assembler->serializer_enabled();
+  } else if (RelocInfo::IsNone(rmode_)) {
+    return false;
+  }
+  return true;
+}
 
 
 // Primarily used for loading constants
@@ -1546,22 +1589,21 @@ int Assembler::DecodeInternalReference(Vector<char> buffer, Address pc) {
 // and only use the generic version when we require a fixed sequence
 void Assembler::mov(Register dst, const Operand& src) {
   intptr_t value = src.immediate();
-  bool canOptimize = (RelocInfo::IsNone(src.rmode_) &&
-                      !is_trampoline_pool_blocked());
+  bool canOptimize;
   RelocInfo rinfo(pc_, src.rmode_, value, NULL);
 
-  if (!RelocInfo::IsNone(src.rmode_)) {
-    // some form of relocation needed
+  if (src.must_output_reloc_info(this)) {
     RecordRelocInfo(rinfo);
   }
 
+  canOptimize = !(src.must_output_reloc_info(this) ||
+                  is_trampoline_pool_blocked());
+
 #if V8_OOL_CONSTANT_POOL
-  if (can_use_constant_pool() &&
-      !(canOptimize && is_int16(value))) {
+  if (use_constant_pool_for_mov(src, canOptimize)) {
+    DCHECK(is_constant_pool_available());
     ConstantPoolAddEntry(rinfo);
 #if V8_TARGET_ARCH_PPC64
-    // We don't support 32-bit entries at this time
-    ASSERT(rinfo.rmode() != RelocInfo::NONE32);
     ld(dst, MemOperand(kConstantPoolRegister, 0));
 #else
     lwz(dst, MemOperand(kConstantPoolRegister, 0));
@@ -1605,7 +1647,7 @@ void Assembler::mov(Register dst, const Operand& src) {
     return;
   }
 
-  ASSERT(!canOptimize);
+  DCHECK(!canOptimize);
 
   {
     BlockTrampolinePoolScope block_trampoline_pool(this);
@@ -1639,7 +1681,7 @@ void Assembler::mov_label_offset(Register dst, Label* label) {
     bool is_linked = label->is_linked();
     // Emit the link to the label in the code stream followed by extra
     // nop instructions.
-    ASSERT(dst.is(r3));  // target_at_put assumes r3 for now
+    DCHECK(dst.is(r3));  // target_at_put assumes r3 for now
     int link = is_linked ? label->pos() - pc_offset(): 0;
     label->link_to(pc_offset());
 
@@ -1777,7 +1819,7 @@ void Assembler::sync() {
 
 
 void Assembler::lwsync() {
-  emit(EXT2 | SYNC | 1*B21);
+    emit(EXT2 | SYNC | 1*B21);
 }
 
 
@@ -1796,7 +1838,7 @@ void Assembler::isync() {
 void Assembler::lfd(const DoubleRegister frt, const MemOperand &src) {
   int offset = src.offset();
   Register ra = src.ra();
-  ASSERT(is_int16(offset));
+  DCHECK(is_int16(offset));
   int imm16 = offset & kImm16Mask;
   // could be x_form instruction with some casting magic
   emit(LFD | frt.code()*B21 | ra.code()*B16 | imm16);
@@ -1806,7 +1848,7 @@ void Assembler::lfd(const DoubleRegister frt, const MemOperand &src) {
 void Assembler::lfdu(const DoubleRegister frt, const MemOperand &src) {
   int offset = src.offset();
   Register ra = src.ra();
-  ASSERT(is_int16(offset));
+  DCHECK(is_int16(offset));
   int imm16 = offset & kImm16Mask;
   // could be x_form instruction with some casting magic
   emit(LFDU | frt.code()*B21 | ra.code()*B16 | imm16);
@@ -1816,7 +1858,7 @@ void Assembler::lfdu(const DoubleRegister frt, const MemOperand &src) {
 void Assembler::lfdx(const DoubleRegister frt, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | LFDX | frt.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
@@ -1824,7 +1866,7 @@ void Assembler::lfdx(const DoubleRegister frt, const MemOperand &src) {
 void Assembler::lfdux(const DoubleRegister frt, const MemOperand & src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | LFDUX | frt.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
@@ -1832,8 +1874,8 @@ void Assembler::lfdux(const DoubleRegister frt, const MemOperand & src) {
 void Assembler::lfs(const DoubleRegister frt, const MemOperand &src) {
   int offset = src.offset();
   Register ra = src.ra();
-  ASSERT(is_int16(offset));
-  ASSERT(!ra.is(r0));
+  DCHECK(is_int16(offset));
+  DCHECK(!ra.is(r0));
   int imm16 = offset & kImm16Mask;
   // could be x_form instruction with some casting magic
   emit(LFS | frt.code()*B21 | ra.code()*B16 | imm16);
@@ -1843,8 +1885,8 @@ void Assembler::lfs(const DoubleRegister frt, const MemOperand &src) {
 void Assembler::lfsu(const DoubleRegister frt, const MemOperand &src) {
   int offset = src.offset();
   Register ra = src.ra();
-  ASSERT(is_int16(offset));
-  ASSERT(!ra.is(r0));
+  DCHECK(is_int16(offset));
+  DCHECK(!ra.is(r0));
   int imm16 = offset & kImm16Mask;
   // could be x_form instruction with some casting magic
   emit(LFSU | frt.code()*B21 | ra.code()*B16 | imm16);
@@ -1854,7 +1896,7 @@ void Assembler::lfsu(const DoubleRegister frt, const MemOperand &src) {
 void Assembler::lfsx(const DoubleRegister frt, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | LFSX | frt.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
@@ -1862,7 +1904,7 @@ void Assembler::lfsx(const DoubleRegister frt, const MemOperand &src) {
 void Assembler::lfsux(const DoubleRegister frt, const MemOperand & src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | LFSUX | frt.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
@@ -1870,8 +1912,8 @@ void Assembler::lfsux(const DoubleRegister frt, const MemOperand & src) {
 void Assembler::stfd(const DoubleRegister frs, const MemOperand &src) {
   int offset = src.offset();
   Register ra = src.ra();
-  ASSERT(is_int16(offset));
-  ASSERT(!ra.is(r0));
+  DCHECK(is_int16(offset));
+  DCHECK(!ra.is(r0));
   int imm16 = offset & kImm16Mask;
   // could be x_form instruction with some casting magic
   emit(STFD | frs.code()*B21 | ra.code()*B16 | imm16);
@@ -1881,8 +1923,8 @@ void Assembler::stfd(const DoubleRegister frs, const MemOperand &src) {
 void Assembler::stfdu(const DoubleRegister frs, const MemOperand &src) {
   int offset = src.offset();
   Register ra = src.ra();
-  ASSERT(is_int16(offset));
-  ASSERT(!ra.is(r0));
+  DCHECK(is_int16(offset));
+  DCHECK(!ra.is(r0));
   int imm16 = offset & kImm16Mask;
   // could be x_form instruction with some casting magic
   emit(STFDU | frs.code()*B21 | ra.code()*B16 | imm16);
@@ -1892,7 +1934,7 @@ void Assembler::stfdu(const DoubleRegister frs, const MemOperand &src) {
 void Assembler::stfdx(const DoubleRegister frs, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | STFDX | frs.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
@@ -1900,7 +1942,7 @@ void Assembler::stfdx(const DoubleRegister frs, const MemOperand &src) {
 void Assembler::stfdux(const DoubleRegister frs, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | STFDUX | frs.code()*B21 | ra.code()*B16 | rb.code()*B11 |LeaveRC);
 }
 
@@ -1908,8 +1950,8 @@ void Assembler::stfdux(const DoubleRegister frs, const MemOperand &src) {
 void Assembler::stfs(const DoubleRegister frs, const MemOperand &src) {
   int offset = src.offset();
   Register ra = src.ra();
-  ASSERT(is_int16(offset));
-  ASSERT(!ra.is(r0));
+  DCHECK(is_int16(offset));
+  DCHECK(!ra.is(r0));
   int imm16 = offset & kImm16Mask;
   // could be x_form instruction with some casting magic
   emit(STFS | frs.code()*B21 | ra.code()*B16 | imm16);
@@ -1919,8 +1961,8 @@ void Assembler::stfs(const DoubleRegister frs, const MemOperand &src) {
 void Assembler::stfsu(const DoubleRegister frs, const MemOperand &src) {
   int offset = src.offset();
   Register ra = src.ra();
-  ASSERT(is_int16(offset));
-  ASSERT(!ra.is(r0));
+  DCHECK(is_int16(offset));
+  DCHECK(!ra.is(r0));
   int imm16 = offset & kImm16Mask;
   // could be x_form instruction with some casting magic
   emit(STFSU | frs.code()*B21 | ra.code()*B16 | imm16);
@@ -1930,7 +1972,7 @@ void Assembler::stfsu(const DoubleRegister frs, const MemOperand &src) {
 void Assembler::stfsx(const DoubleRegister frs, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | STFSX | frs.code()*B21 | ra.code()*B16 | rb.code()*B11 |LeaveRC);
 }
 
@@ -1938,7 +1980,7 @@ void Assembler::stfsx(const DoubleRegister frs, const MemOperand &src) {
 void Assembler::stfsux(const DoubleRegister frs, const MemOperand &src) {
   Register ra = src.ra();
   Register rb = src.rb();
-  ASSERT(!ra.is(r0));
+  DCHECK(!ra.is(r0));
   emit(EXT2 | STFSUX | frs.code()*B21 | ra.code()*B16 | rb.code()*B11 |LeaveRC);
 }
 
@@ -1978,7 +2020,7 @@ void Assembler::fdiv(const DoubleRegister frt,
 void Assembler::fcmpu(const DoubleRegister fra,
                       const DoubleRegister frb,
                       CRegister cr) {
-  ASSERT(cr.code() >= 0 && cr.code() <= 7);
+  DCHECK(cr.code() >= 0 && cr.code() <= 7);
   emit(EXT4 | FCMPU | cr.code()*B23 | fra.code()*B16 | frb.code()*B11);
 }
 
@@ -2246,7 +2288,7 @@ void Assembler::RecordRelocInfo(const RelocInfo& rinfo) {
   if (rinfo.rmode() >= RelocInfo::JS_RETURN &&
       rinfo.rmode() <= RelocInfo::DEBUG_BREAK_SLOT) {
     // Adjust code for new modes.
-    ASSERT(RelocInfo::IsDebugBreakSlot(rinfo.rmode())
+    DCHECK(RelocInfo::IsDebugBreakSlot(rinfo.rmode())
            || RelocInfo::IsJSReturn(rinfo.rmode())
            || RelocInfo::IsComment(rinfo.rmode())
            || RelocInfo::IsPosition(rinfo.rmode()));
@@ -2254,11 +2296,11 @@ void Assembler::RecordRelocInfo(const RelocInfo& rinfo) {
   if (!RelocInfo::IsNone(rinfo.rmode())) {
     // Don't record external references unless the heap will be serialized.
     if (rinfo.rmode() == RelocInfo::EXTERNAL_REFERENCE) {
-      if (!Serializer::enabled(isolate()) && !emit_debug_code()) {
+      if (!serializer_enabled() && !emit_debug_code()) {
         return;
       }
     }
-    ASSERT(buffer_space() >= kMaxRelocSize);  // too late to grow buffer here
+    DCHECK(buffer_space() >= kMaxRelocSize);  // too late to grow buffer here
     if (rinfo.rmode() == RelocInfo::CODE_TARGET_WITH_ID) {
       RelocInfo reloc_info_with_ast_id(rinfo.pc(),
                                        rinfo.rmode(),
@@ -2296,8 +2338,8 @@ void Assembler::CheckTrampolinePool() {
     return;
   }
 
-  ASSERT(!trampoline_emitted_);
-  ASSERT(unbound_labels_count_ >= 0);
+  DCHECK(!trampoline_emitted_);
+  DCHECK(unbound_labels_count_ >= 0);
   if (unbound_labels_count_ > 0) {
     // First we emit jump, then we emit trampoline pool.
     { BlockTrampolinePoolScope block_trampoline_pool(this);
@@ -2331,7 +2373,7 @@ Handle<ConstantPoolArray> Assembler::NewConstantPool(Isolate* isolate) {
   return constant_pool_builder_.New(isolate);
 #else
   // No out-of-line constant pool support.
-  ASSERT(!FLAG_enable_ool_constant_pool);
+  DCHECK(!FLAG_enable_ool_constant_pool);
   return isolate->factory()->empty_constant_pool_array();
 #endif
 }
@@ -2342,19 +2384,17 @@ void Assembler::PopulateConstantPool(ConstantPoolArray* constant_pool) {
   constant_pool_builder_.Populate(this, constant_pool);
 #else
   // No out-of-line constant pool support.
-  ASSERT(!FLAG_enable_ool_constant_pool);
+  DCHECK(!FLAG_enable_ool_constant_pool);
 #endif
 }
 
 
 #if V8_OOL_CONSTANT_POOL
 ConstantPoolBuilder::ConstantPoolBuilder()
-    : entries_(),
-      merged_indexes_(),
-      count_of_64bit_(0),
-      count_of_code_ptr_(0),
-      count_of_heap_ptr_(0),
-      count_of_32bit_(0) { }
+    : size_(0),
+      entries_(),
+      current_section_(ConstantPoolArray::SMALL_SECTION) {
+}
 
 
 bool ConstantPoolBuilder::IsEmpty() {
@@ -2362,90 +2402,80 @@ bool ConstantPoolBuilder::IsEmpty() {
 }
 
 
-bool ConstantPoolBuilder::Is64BitEntry(RelocInfo::Mode rmode) {
+ConstantPoolArray::Type ConstantPoolBuilder::GetConstantPoolType(
+    RelocInfo::Mode rmode) {
 #if V8_TARGET_ARCH_PPC64
-  return !RelocInfo::IsGCRelocMode(rmode) && rmode != RelocInfo::NONE32;
+  // We don't support 32-bit entries at this time.
+  if (!RelocInfo::IsGCRelocMode(rmode)) {
+    return ConstantPoolArray::INT64;
 #else
-  return rmode == RelocInfo::NONE64;
+  if (rmode == RelocInfo::NONE64) {
+    return ConstantPoolArray::INT64;
+  } else if (!RelocInfo::IsGCRelocMode(rmode)) {
+    return ConstantPoolArray::INT32;
 #endif
+  } else if (RelocInfo::IsCodeTarget(rmode)) {
+    return ConstantPoolArray::CODE_PTR;
+  } else {
+    DCHECK(RelocInfo::IsGCRelocMode(rmode) && !RelocInfo::IsCodeTarget(rmode));
+    return ConstantPoolArray::HEAP_PTR;
+  }
 }
 
 
-bool ConstantPoolBuilder::Is32BitEntry(RelocInfo::Mode rmode) {
-#if V8_TARGET_ARCH_PPC64
-  return rmode == RelocInfo::NONE32;
-#else
-  return !RelocInfo::IsGCRelocMode(rmode) && rmode != RelocInfo::NONE64;
-#endif
-}
-
-
-bool ConstantPoolBuilder::IsCodePtrEntry(RelocInfo::Mode rmode) {
-  return RelocInfo::IsCodeTarget(rmode);
-}
-
-
-bool ConstantPoolBuilder::IsHeapPtrEntry(RelocInfo::Mode rmode) {
-  return RelocInfo::IsGCRelocMode(rmode) && !RelocInfo::IsCodeTarget(rmode);
-}
-
-
-void ConstantPoolBuilder::AddEntry(Assembler* assm,
-                                   const RelocInfo& rinfo) {
+ConstantPoolArray::LayoutSection ConstantPoolBuilder::AddEntry(
+    Assembler* assm, const RelocInfo& rinfo) {
   RelocInfo::Mode rmode = rinfo.rmode();
-  ASSERT(rmode != RelocInfo::COMMENT &&
+  DCHECK(rmode != RelocInfo::COMMENT &&
          rmode != RelocInfo::POSITION &&
          rmode != RelocInfo::STATEMENT_POSITION &&
          rmode != RelocInfo::CONST_POOL);
 
-
   // Try to merge entries which won't be patched.
   int merged_index = -1;
+  ConstantPoolArray::LayoutSection entry_section = current_section_;
   if (RelocInfo::IsNone(rmode) ||
-      (!Serializer::enabled(assm->isolate()) && (rmode >= RelocInfo::CELL))) {
+      (!assm->serializer_enabled() && (rmode >= RelocInfo::CELL))) {
     size_t i;
-    std::vector<RelocInfo>::const_iterator it;
+    std::vector<ConstantPoolEntry>::const_iterator it;
     for (it = entries_.begin(), i = 0; it != entries_.end(); it++, i++) {
-      if (RelocInfo::IsEqual(rinfo, *it)) {
+      if (RelocInfo::IsEqual(rinfo, it->rinfo_)) {
+        // Merge with found entry.
         merged_index = i;
+        entry_section = entries_[i].section_;
         break;
       }
     }
   }
-
-  entries_.push_back(rinfo);
-  merged_indexes_.push_back(merged_index);
+  DCHECK(entry_section <= current_section_);
+  entries_.push_back(ConstantPoolEntry(rinfo, entry_section, merged_index));
 
   if (merged_index == -1) {
     // Not merged, so update the appropriate count.
-    if (Is64BitEntry(rmode)) {
-      count_of_64bit_++;
-    } else if (Is32BitEntry(rmode)) {
-      count_of_32bit_++;
-    } else if (IsCodePtrEntry(rmode)) {
-      count_of_code_ptr_++;
-    } else {
-      ASSERT(IsHeapPtrEntry(rmode));
-      count_of_heap_ptr_++;
-    }
+    number_of_entries_[entry_section].increment(GetConstantPoolType(rmode));
   }
 
-  // Check if we still have room for another entry given PPC's load
-  // immediate offset range.
-  if (!(is_int16(ConstantPoolArray::SizeFor(count_of_64bit_,
-                                            count_of_code_ptr_,
-                                            count_of_heap_ptr_,
-                                            count_of_32bit_)))) {
-    assm->set_constant_pool_full();
+  // Check if we still have room for another entry in the small section
+  // given the limitations of the header's layout fields.
+  if (current_section_ == ConstantPoolArray::SMALL_SECTION) {
+    size_ = ConstantPoolArray::SizeFor(*small_entries());
+    if (!is_uint12(size_)) {
+      current_section_ = ConstantPoolArray::EXTENDED_SECTION;
+    }
+  } else {
+    size_ = ConstantPoolArray::SizeForExtended(*small_entries(),
+                                               *extended_entries());
   }
+
+  return entry_section;
 }
 
 
 void ConstantPoolBuilder::Relocate(intptr_t pc_delta) {
-  for (std::vector<RelocInfo>::iterator rinfo = entries_.begin();
-       rinfo != entries_.end(); rinfo++) {
-    ASSERT(rinfo->rmode() != RelocInfo::JS_RETURN);
-    rinfo->set_pc(rinfo->pc() + pc_delta);
+  for (std::vector<ConstantPoolEntry>::iterator entry = entries_.begin();
+       entry != entries_.end(); entry++) {
+    DCHECK(entry->rinfo_.rmode() != RelocInfo::JS_RETURN);
+    entry->rinfo_.set_pc(entry->rinfo_.pc() + pc_delta);
   }
 }
 
@@ -2453,69 +2483,81 @@ void ConstantPoolBuilder::Relocate(intptr_t pc_delta) {
 Handle<ConstantPoolArray> ConstantPoolBuilder::New(Isolate* isolate) {
   if (IsEmpty()) {
     return isolate->factory()->empty_constant_pool_array();
+  } else if (extended_entries()->is_empty()) {
+    return isolate->factory()->NewConstantPoolArray(*small_entries());
   } else {
-    return isolate->factory()->NewConstantPoolArray(count_of_64bit_,
-                                                    count_of_code_ptr_,
-                                                    count_of_heap_ptr_,
-                                                    count_of_32bit_);
+    DCHECK(current_section_ == ConstantPoolArray::EXTENDED_SECTION);
+    return isolate->factory()->NewExtendedConstantPoolArray(
+        *small_entries(), *extended_entries());
   }
 }
 
 
 void ConstantPoolBuilder::Populate(Assembler* assm,
                                    ConstantPoolArray* constant_pool) {
-  ASSERT(constant_pool->count_of_int64_entries() == count_of_64bit_);
-  ASSERT(constant_pool->count_of_code_ptr_entries() == count_of_code_ptr_);
-  ASSERT(constant_pool->count_of_heap_ptr_entries() == count_of_heap_ptr_);
-  ASSERT(constant_pool->count_of_int32_entries() == count_of_32bit_);
-  ASSERT(entries_.size() == merged_indexes_.size());
+  DCHECK_EQ(extended_entries()->is_empty(),
+            !constant_pool->is_extended_layout());
+  DCHECK(small_entries()->equals(ConstantPoolArray::NumberOfEntries(
+      constant_pool, ConstantPoolArray::SMALL_SECTION)));
+  if (constant_pool->is_extended_layout()) {
+    DCHECK(extended_entries()->equals(ConstantPoolArray::NumberOfEntries(
+        constant_pool, ConstantPoolArray::EXTENDED_SECTION)));
+  }
 
-  int index_64bit = 0;
-  int index_code_ptr = count_of_64bit_;
-  int index_heap_ptr = count_of_64bit_ + count_of_code_ptr_;
-  int index_32bit = count_of_64bit_ + count_of_code_ptr_ + count_of_heap_ptr_;
+  // Set up initial offsets.
+  int offsets[ConstantPoolArray::NUMBER_OF_LAYOUT_SECTIONS]
+             [ConstantPoolArray::NUMBER_OF_TYPES];
+  for (int section = 0; section <= constant_pool->final_section(); section++) {
+    int section_start = (section == ConstantPoolArray::EXTENDED_SECTION)
+                            ? small_entries()->total_count()
+                            : 0;
+    for (int i = 0; i < ConstantPoolArray::NUMBER_OF_TYPES; i++) {
+      ConstantPoolArray::Type type = static_cast<ConstantPoolArray::Type>(i);
+      if (number_of_entries_[section].count_of(type) != 0) {
+        offsets[section][type] = constant_pool->OffsetOfElementAt(
+            number_of_entries_[section].base_of(type) + section_start);
+      }
+    }
+  }
 
-  size_t i;
-  std::vector<RelocInfo>::const_iterator rinfo;
-  for (rinfo = entries_.begin(), i = 0; rinfo != entries_.end(); rinfo++, i++) {
-    RelocInfo::Mode rmode = rinfo->rmode();
+  for (std::vector<ConstantPoolEntry>::iterator entry = entries_.begin();
+       entry != entries_.end(); entry++) {
+    RelocInfo rinfo = entry->rinfo_;
+    RelocInfo::Mode rmode = entry->rinfo_.rmode();
+    ConstantPoolArray::Type type = GetConstantPoolType(rmode);
 
     // Update constant pool if necessary and get the entry's offset.
     int offset;
-    if (merged_indexes_[i] == -1) {
-      if (Is64BitEntry(rmode)) {
-        offset = constant_pool->OffsetOfElementAt(index_64bit) - kHeapObjectTag;
-        constant_pool->set(index_64bit++, rinfo->data64());
-      } else if (Is32BitEntry(rmode)) {
-        offset = constant_pool->OffsetOfElementAt(index_32bit) - kHeapObjectTag;
-        constant_pool->set(index_32bit++, static_cast<int32_t>(rinfo->data()));
-      } else if (IsCodePtrEntry(rmode)) {
-        offset = constant_pool->OffsetOfElementAt(index_code_ptr) -
-            kHeapObjectTag;
-        constant_pool->set(index_code_ptr++,
-                           reinterpret_cast<Object *>(rinfo->data()));
+    if (entry->merged_index_ == -1) {
+      offset = offsets[entry->section_][type];
+      offsets[entry->section_][type] += ConstantPoolArray::entry_size(type);
+      if (type == ConstantPoolArray::INT64) {
+#if V8_TARGET_ARCH_PPC64
+        constant_pool->set_at_offset(offset, rinfo.data());
+#else
+        constant_pool->set_at_offset(offset, rinfo.data64());
+      } else if (type == ConstantPoolArray::INT32) {
+        constant_pool->set_at_offset(offset,
+                                     static_cast<int32_t>(rinfo.data()));
+#endif
+      } else if (type == ConstantPoolArray::CODE_PTR) {
+        constant_pool->set_at_offset(offset,
+                                     reinterpret_cast<Address>(rinfo.data()));
       } else {
-        ASSERT(IsHeapPtrEntry(rmode));
-        offset = constant_pool->OffsetOfElementAt(index_heap_ptr) -
-            kHeapObjectTag;
-        constant_pool->set(index_heap_ptr++,
-                           reinterpret_cast<Object *>(rinfo->data()));
+        DCHECK(type == ConstantPoolArray::HEAP_PTR);
+        constant_pool->set_at_offset(offset,
+                                     reinterpret_cast<Object*>(rinfo.data()));
       }
-      merged_indexes_[i] = offset;  // Stash offset for merged entries.
+      offset -= kHeapObjectTag;
+      entry->merged_index_ = offset;  // Stash offset for merged entries.
     } else {
-      size_t merged_index = static_cast<size_t>(merged_indexes_[i]);
-      ASSERT(merged_index < merged_indexes_.size() && merged_index < i);
-      offset = merged_indexes_[merged_index];
+      DCHECK(entry->merged_index_ < (entry - entries_.begin()));
+      offset = entries_[entry->merged_index_].merged_index_;
     }
 
     // Patch load instruction with correct offset.
-    Assembler::SetConstantPoolOffset(rinfo->pc(), offset);
+    Assembler::SetConstantPoolOffset(rinfo.pc(), offset);
   }
-
-  ASSERT((index_64bit == count_of_64bit_) &&
-         (index_code_ptr == (index_64bit + count_of_code_ptr_)) &&
-         (index_heap_ptr == (index_code_ptr + count_of_heap_ptr_)) &&
-         (index_32bit == (index_heap_ptr + count_of_32bit_)));
 }
 #endif
 

@@ -56,13 +56,13 @@ enum Condition {
 
 
 inline Condition NegateCondition(Condition cond) {
-  ASSERT(cond != al);
+  DCHECK(cond != al);
   return static_cast<Condition>(cond ^ ne);
 }
 
 
-// Corresponds to transposing the operands of a comparison.
-inline Condition ReverseCondition(Condition cond) {
+// Commute a condition such that {a cond b == b cond' a}.
+inline Condition CommuteCondition(Condition cond) {
   switch (cond) {
     case lt:
       return gt;
@@ -74,7 +74,7 @@ inline Condition ReverseCondition(Condition cond) {
       return ge;
     default:
       return cond;
-  };
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -166,6 +166,7 @@ enum OpcodeExt2 {
   SUBFCX = 8 << 1,
   ADDCX = 10 << 1,
   MULHWUX = 11 << 1,
+  ISEL = 15 << 1,
   MFCR = 19 << 1,
   LWARX = 20 << 1,
   LDX = 21 << 1,

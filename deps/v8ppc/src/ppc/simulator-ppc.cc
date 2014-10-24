@@ -9,16 +9,16 @@
 #include <stdlib.h>
 #include <cmath>
 
-#include "v8.h"
+#include "src/v8.h"
 
 #if V8_TARGET_ARCH_PPC
 
-#include "disasm.h"
-#include "assembler.h"
-#include "codegen.h"
-#include "ppc/constants-ppc.h"
-#include "ppc/simulator-ppc.h"
-#include "ppc/frames-ppc.h"
+#include "src/assembler.h"
+#include "src/codegen.h"
+#include "src/disasm.h"
+#include "src/ppc/constants-ppc.h"
+#include "src/ppc/frames-ppc.h"
+#include "src/ppc/simulator-ppc.h"
 
 #if defined(USE_SIMULATOR)
 
@@ -90,7 +90,7 @@ void PPCDebugger::Stop(Instruction* instr) {  // roohack need to fix for PPC
   char** msg_address =
     reinterpret_cast<char**>(sim_->get_pc() + Instruction::kInstrSize);
   char* msg = *msg_address;
-  ASSERT(msg != NULL);
+  DCHECK(msg != NULL);
 
   // Update this stop description.
   if (isWatchedStop(code) && !watched_stops_[code].desc) {
@@ -411,17 +411,18 @@ void PPCDebugger::Debug() {
                  || (strcmp(cmd, "printobject") == 0)) {
         if (argc == 2) {
           intptr_t value;
+          OFStream os(stdout);
           if (GetValue(arg1, &value)) {
             Object* obj = reinterpret_cast<Object*>(value);
-            PrintF("%s: \n", arg1);
+            os << arg1 << ": \n";
 #ifdef DEBUG
-            obj->PrintLn();
+            obj->Print(os);
+            os << "\n";
 #else
-            obj->ShortPrint();
-            PrintF("\n");
+            os << Brief(obj) << "\n";
 #endif
           } else {
-            PrintF("%s unrecognized\n", arg1);
+            os << arg1 << " unrecognized\n";
           }
         } else {
           PrintF("printobject <value>\n");
@@ -528,7 +529,7 @@ void PPCDebugger::Debug() {
         }
       } else if (strcmp(cmd, "gdb") == 0) {
         PrintF("relinquishing control to gdb\n");
-        v8::internal::OS::DebugBreak();
+        v8::base::OS::DebugBreak();
         PrintF("regaining control from gdb\n");
       } else if (strcmp(cmd, "break") == 0) {
         if (argc == 2) {
@@ -700,8 +701,8 @@ void PPCDebugger::Debug() {
 
 
 static bool ICacheMatch(void* one, void* two) {
-  ASSERT((reinterpret_cast<intptr_t>(one) & CachePage::kPageMask) == 0);
-  ASSERT((reinterpret_cast<intptr_t>(two) & CachePage::kPageMask) == 0);
+  DCHECK((reinterpret_cast<intptr_t>(one) & CachePage::kPageMask) == 0);
+  DCHECK((reinterpret_cast<intptr_t>(two) & CachePage::kPageMask) == 0);
   return one == two;
 }
 
@@ -738,7 +739,7 @@ void Simulator::FlushICache(v8::internal::HashMap* i_cache,
     FlushOnePage(i_cache, start, bytes_to_flush);
     start += bytes_to_flush;
     size -= bytes_to_flush;
-    ASSERT_EQ(0, static_cast<int>(start & CachePage::kPageMask));
+    DCHECK_EQ(0, static_cast<int>(start & CachePage::kPageMask));
     offset = 0;
   }
   if (size != 0) {
@@ -763,10 +764,10 @@ CachePage* Simulator::GetCachePage(v8::internal::HashMap* i_cache, void* page) {
 void Simulator::FlushOnePage(v8::internal::HashMap* i_cache,
                              intptr_t start,
                              int size) {
-  ASSERT(size <= CachePage::kPageSize);
-  ASSERT(AllOnOnePage(start, size - 1));
-  ASSERT((start & CachePage::kLineMask) == 0);
-  ASSERT((size & CachePage::kLineMask) == 0);
+  DCHECK(size <= CachePage::kPageSize);
+  DCHECK(AllOnOnePage(start, size - 1));
+  DCHECK((start & CachePage::kLineMask) == 0);
+  DCHECK((size & CachePage::kLineMask) == 0);
   void* page = reinterpret_cast<void*>(start & (~CachePage::kPageMask));
   int offset = (start & CachePage::kPageMask);
   CachePage* cache_page = GetCachePage(i_cache, page);
@@ -787,12 +788,12 @@ void Simulator::CheckICache(v8::internal::HashMap* i_cache,
   char* cached_line = cache_page->CachedData(offset & ~CachePage::kLineMask);
   if (cache_hit) {
     // Check that the data in memory matches the contents of the I-cache.
-    CHECK(memcmp(reinterpret_cast<void*>(instr),
-                 cache_page->CachedData(offset),
-                 Instruction::kInstrSize) == 0);
+    CHECK_EQ(0, memcmp(reinterpret_cast<void*>(instr),
+                       cache_page->CachedData(offset),
+                       Instruction::kInstrSize));
   } else {
     // Cache miss.  Load memory into the cache.
-    OS::MemCopy(cached_line, line, CachePage::kLineLength);
+    memcpy(cached_line, line, CachePage::kLineLength);
     *cache_valid_byte = CachePage::LINE_VALID;
   }
 }
@@ -892,7 +893,7 @@ class Redirection {
     Redirection* current = isolate->simulator_redirection();
     for (; current != NULL; current = current->next_) {
       if (current->external_function_ == external_function) {
-        ASSERT_EQ(current->type(), type);
+        DCHECK_EQ(current->type(), type);
         return current;
       }
     }
@@ -931,7 +932,7 @@ void* Simulator::RedirectExternalReference(void* external_function,
 Simulator* Simulator::current(Isolate* isolate) {
   v8::internal::Isolate::PerIsolateThreadData* isolate_data =
       isolate->FindOrAllocatePerThreadDataForThisThread();
-  ASSERT(isolate_data != NULL);
+  DCHECK(isolate_data != NULL);
 
   Simulator* sim = isolate_data->simulator();
   if (sim == NULL) {
@@ -945,14 +946,14 @@ Simulator* Simulator::current(Isolate* isolate) {
 
 // Sets the register in the architecture state.
 void Simulator::set_register(int reg, intptr_t value) {
-  ASSERT((reg >= 0) && (reg < kNumGPRs));
+  DCHECK((reg >= 0) && (reg < kNumGPRs));
   registers_[reg] = value;
 }
 
 
 // Get the register from the architecture state.
 intptr_t Simulator::get_register(int reg) const {
-  ASSERT((reg >= 0) && (reg < kNumGPRs));
+  DCHECK((reg >= 0) && (reg < kNumGPRs));
   // Stupid code added to avoid bug in GCC.
   // See: http://gcc.gnu.org/bugzilla/show_bug.cgi?id=43949
   if (reg >= kNumGPRs) return 0;
@@ -962,15 +963,15 @@ intptr_t Simulator::get_register(int reg) const {
 
 
 double Simulator::get_double_from_register_pair(int reg) {
-  ASSERT((reg >= 0) && (reg < kNumGPRs) && ((reg % 2) == 0));
+  DCHECK((reg >= 0) && (reg < kNumGPRs) && ((reg % 2) == 0));
 
   double dm_val = 0.0;
 #if !V8_TARGET_ARCH_PPC64  // doesn't make sense in 64bit mode
   // Read the bits from the unsigned integer register_[] array
   // into the double precision floating point value and return it.
   char buffer[sizeof(fp_registers_[0])];
-  OS::MemCopy(buffer, &registers_[reg], 2 * sizeof(registers_[0]));
-  OS::MemCopy(&dm_val, buffer, 2 * sizeof(registers_[0]));
+  memcpy(buffer, &registers_[reg], 2 * sizeof(registers_[0]));
+  memcpy(&dm_val, buffer, 2 * sizeof(registers_[0]));
 #endif
   return(dm_val);
 }
@@ -1431,7 +1432,7 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
         }
         CHECK(stack_aligned);
 #if !V8_TARGET_ARCH_PPC64
-        ASSERT(redirection->type() == ExternalReference::BUILTIN_CALL);
+        DCHECK(redirection->type() == ExternalReference::BUILTIN_CALL);
         SimulatorRuntimeCall target =
           reinterpret_cast<SimulatorRuntimeCall>(external);
         int64_t result = target(arg[0], arg[1], arg[2], arg[3], arg[4], arg[5]);
@@ -1461,7 +1462,7 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
           }
           set_register(r3, result);
         } else {
-          ASSERT(redirection->type() ==
+          DCHECK(redirection->type() ==
                  ExternalReference::BUILTIN_OBJECTPAIR_CALL);
           SimulatorRuntimeObjectPairCall target =
             reinterpret_cast<SimulatorRuntimeObjectPairCall>(external);
@@ -1475,8 +1476,8 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
           set_register(r3, result.x);
           set_register(r4, result.y);
 #else
-          OS::MemCopy(reinterpret_cast<void *>(result_buffer), &result,
-                      sizeof(struct ObjectPair));
+          memcpy(reinterpret_cast<void *>(result_buffer), &result,
+                 sizeof(struct ObjectPair));
 #endif
         }
 #endif
@@ -1526,13 +1527,13 @@ bool Simulator::isStopInstruction(Instruction* instr) {
 
 
 bool Simulator::isWatchedStop(uint32_t code) {
-  ASSERT(code <= kMaxStopCode);
+  DCHECK(code <= kMaxStopCode);
   return code < kNumOfWatchedStops;
 }
 
 
 bool Simulator::isEnabledStop(uint32_t code) {
-  ASSERT(code <= kMaxStopCode);
+  DCHECK(code <= kMaxStopCode);
   // Unwatched stops are always enabled.
   return !isWatchedStop(code) ||
     !(watched_stops_[code].count & kStopDisabledBit);
@@ -1540,7 +1541,7 @@ bool Simulator::isEnabledStop(uint32_t code) {
 
 
 void Simulator::EnableStop(uint32_t code) {
-  ASSERT(isWatchedStop(code));
+  DCHECK(isWatchedStop(code));
   if (!isEnabledStop(code)) {
     watched_stops_[code].count &= ~kStopDisabledBit;
   }
@@ -1548,7 +1549,7 @@ void Simulator::EnableStop(uint32_t code) {
 
 
 void Simulator::DisableStop(uint32_t code) {
-  ASSERT(isWatchedStop(code));
+  DCHECK(isWatchedStop(code));
   if (isEnabledStop(code)) {
     watched_stops_[code].count |= kStopDisabledBit;
   }
@@ -1556,8 +1557,8 @@ void Simulator::DisableStop(uint32_t code) {
 
 
 void Simulator::IncreaseStopCounter(uint32_t code) {
-  ASSERT(code <= kMaxStopCode);
-  ASSERT(isWatchedStop(code));
+  DCHECK(code <= kMaxStopCode);
+  DCHECK(isWatchedStop(code));
   if ((watched_stops_[code].count & ~(1 << 31)) == 0x7fffffff) {
     PrintF("Stop counter for code %i has overflowed.\n"
            "Enabling this code and reseting the counter to 0.\n", code);
@@ -1571,7 +1572,7 @@ void Simulator::IncreaseStopCounter(uint32_t code) {
 
 // Print a stop status.
 void Simulator::PrintStopInfo(uint32_t code) {
-  ASSERT(code <= kMaxStopCode);
+  DCHECK(code <= kMaxStopCode);
   if (!isWatchedStop(code)) {
     PrintF("Stop not watched.");
   } else {
@@ -1842,7 +1843,7 @@ bool Simulator::ExecuteExt2_10bit(Instruction *instr) {
       float *fptr = reinterpret_cast<float*>(&val);
       set_d_register_from_double(frt, static_cast<double>(*fptr));
       if (opcode == LFSUX) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+rb_val);
       }
       break;
@@ -1857,7 +1858,7 @@ bool Simulator::ExecuteExt2_10bit(Instruction *instr) {
       double *dptr = reinterpret_cast<double*>(ReadDW(ra_val + rb_val));
       set_d_register_from_double(frt, *dptr);
       if (opcode == LFDUX) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+rb_val);
       }
       break;
@@ -1873,7 +1874,7 @@ bool Simulator::ExecuteExt2_10bit(Instruction *instr) {
       int32_t *p=  reinterpret_cast<int32_t*>(&frs_val);
       WriteW(ra_val + rb_val, *p, instr);
       if (opcode == STFSUX) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+rb_val);
       }
       break;
@@ -1889,7 +1890,7 @@ bool Simulator::ExecuteExt2_10bit(Instruction *instr) {
       int64_t *p = reinterpret_cast<int64_t *>(&frs_val);
       WriteDW(ra_val + rb_val, *p);
       if (opcode == STFDUX) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+rb_val);
       }
       break;
@@ -2084,7 +2085,7 @@ bool Simulator::ExecuteExt2_9bit_part1(Instruction* instr) {
       break;
     }
     case MFVSRD: {
-      ASSERT(!instr->Bit(0));
+      DCHECK(!instr->Bit(0));
       int frt = instr->RTValue();
       int ra = instr->RAValue();
       double frt_val = get_double_from_d_register(frt);
@@ -2093,7 +2094,7 @@ bool Simulator::ExecuteExt2_9bit_part1(Instruction* instr) {
       break;
     }
     case MFVSRWZ: {
-      ASSERT(!instr->Bit(0));
+      DCHECK(!instr->Bit(0));
       int frt = instr->RTValue();
       int ra = instr->RAValue();
       double frt_val = get_double_from_d_register(frt);
@@ -2102,7 +2103,7 @@ bool Simulator::ExecuteExt2_9bit_part1(Instruction* instr) {
       break;
     }
     case MTVSRD: {
-      ASSERT(!instr->Bit(0));
+      DCHECK(!instr->Bit(0));
       int frt = instr->RTValue();
       int ra = instr->RAValue();
       int64_t ra_val = get_register(ra);
@@ -2111,7 +2112,7 @@ bool Simulator::ExecuteExt2_9bit_part1(Instruction* instr) {
       break;
     }
     case MTVSRWA: {
-      ASSERT(!instr->Bit(0));
+      DCHECK(!instr->Bit(0));
       int frt = instr->RTValue();
       int ra = instr->RAValue();
       int64_t ra_val = static_cast<int32_t>(get_register(ra));
@@ -2120,7 +2121,7 @@ bool Simulator::ExecuteExt2_9bit_part1(Instruction* instr) {
       break;
     }
     case MTVSRWZ: {
-      ASSERT(!instr->Bit(0));
+      DCHECK(!instr->Bit(0));
       int frt = instr->RTValue();
       int ra = instr->RAValue();
       uint64_t ra_val = static_cast<uint32_t>(get_register(ra));
@@ -2433,6 +2434,18 @@ void Simulator::ExecuteExt2_9bit_part2(Instruction* instr) {
       set_register(rt, condition_reg_);
       break;
     }
+    case ISEL: {
+      int rt = instr->RTValue();
+      int ra = instr->RAValue();
+      int rb = instr->RBValue();
+      int condition_bit = instr->RCValue();
+      int condition_mask = 0x80000000 >> condition_bit;
+      intptr_t ra_val = (ra == 0) ? 0 : get_register(ra);
+      intptr_t rb_val = get_register(rb);
+      intptr_t value = (condition_reg_ & condition_mask) ? ra_val : rb_val;
+      set_register(rt, value);
+      break;
+    }
     case STWUX:
     case STWX: {
       int rs = instr->RSValue();
@@ -2443,7 +2456,7 @@ void Simulator::ExecuteExt2_9bit_part2(Instruction* instr) {
       intptr_t rb_val = get_register(rb);
       WriteW(ra_val+rb_val, rs_val, instr);
       if (opcode == STWUX) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+rb_val);
       }
       break;
@@ -2458,7 +2471,7 @@ void Simulator::ExecuteExt2_9bit_part2(Instruction* instr) {
       intptr_t rb_val = get_register(rb);
       WriteB(ra_val+rb_val, rs_val);
       if (opcode == STBUX) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+rb_val);
       }
       break;
@@ -2473,7 +2486,7 @@ void Simulator::ExecuteExt2_9bit_part2(Instruction* instr) {
       intptr_t rb_val = get_register(rb);
       WriteH(ra_val+rb_val, rs_val, instr);
       if (opcode == STHUX) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+rb_val);
       }
       break;
@@ -2487,7 +2500,7 @@ void Simulator::ExecuteExt2_9bit_part2(Instruction* instr) {
       intptr_t rb_val = get_register(rb);
       set_register(rt, ReadWU(ra_val+rb_val, instr));
       if (opcode == LWZUX) {
-        ASSERT(ra != 0 && ra != rt);
+        DCHECK(ra != 0 && ra != rt);
         set_register(ra, ra_val+rb_val);
       }
       break;
@@ -2503,7 +2516,7 @@ void Simulator::ExecuteExt2_9bit_part2(Instruction* instr) {
       intptr_t *result = ReadDW(ra_val+rb_val);
       set_register(rt, *result);
       if (opcode == LDUX) {
-        ASSERT(ra != 0 && ra != rt);
+        DCHECK(ra != 0 && ra != rt);
         set_register(ra, ra_val+rb_val);
       }
       break;
@@ -2518,7 +2531,7 @@ void Simulator::ExecuteExt2_9bit_part2(Instruction* instr) {
       intptr_t rb_val = get_register(rb);
       WriteDW(ra_val+rb_val, rs_val);
       if (opcode == STDUX) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+rb_val);
       }
       break;
@@ -2533,7 +2546,7 @@ void Simulator::ExecuteExt2_9bit_part2(Instruction* instr) {
       intptr_t rb_val = get_register(rb);
       set_register(rt, ReadBU(ra_val+rb_val) & 0xFF);
       if (opcode == LBZUX) {
-        ASSERT(ra != 0 && ra != rt);
+        DCHECK(ra != 0 && ra != rt);
         set_register(ra, ra_val+rb_val);
       }
       break;
@@ -2547,7 +2560,7 @@ void Simulator::ExecuteExt2_9bit_part2(Instruction* instr) {
       intptr_t rb_val = get_register(rb);
       set_register(rt, ReadHU(ra_val+rb_val, instr) & 0xFFFF);
       if (opcode == LHZUX) {
-        ASSERT(ra != 0 && ra != rt);
+        DCHECK(ra != 0 && ra != rt);
         set_register(ra, ra_val+rb_val);
       }
       break;
@@ -2790,7 +2803,7 @@ void Simulator::ExecuteExt4(Instruction* instr) {
 
             break;
           default:
-            ASSERT(false);
+            DCHECK(false);
             frt_val = (int64_t)frb_val;
             break;
           }
@@ -2885,8 +2898,8 @@ void Simulator::ExecuteExt5(Instruction* instr) {
       uintptr_t rs_val = get_register(rs);
       int sh = (instr->Bits(15, 11) | (instr->Bit(1) << 5));
       int mb = (instr->Bits(10, 6) | (instr->Bit(5) << 5));
-      ASSERT(sh >=0 && sh <= 63);
-      ASSERT(mb >=0 && mb <= 63);
+      DCHECK(sh >=0 && sh <= 63);
+      DCHECK(mb >=0 && mb <= 63);
       // rotate left
       uintptr_t result = (rs_val << sh) | (rs_val >> (64-sh));
       uintptr_t mask = 0xffffffffffffffff >> mb;
@@ -2903,8 +2916,8 @@ void Simulator::ExecuteExt5(Instruction* instr) {
       uintptr_t rs_val = get_register(rs);
       int sh = (instr->Bits(15, 11) | (instr->Bit(1) << 5));
       int me = (instr->Bits(10, 6) | (instr->Bit(5) << 5));
-      ASSERT(sh >=0 && sh <= 63);
-      ASSERT(me >=0 && me <= 63);
+      DCHECK(sh >=0 && sh <= 63);
+      DCHECK(me >=0 && me <= 63);
       // rotate left
       uintptr_t result = (rs_val << sh) | (rs_val >> (64-sh));
       uintptr_t mask = 0xffffffffffffffff << (63-me);
@@ -2921,8 +2934,8 @@ void Simulator::ExecuteExt5(Instruction* instr) {
       uintptr_t rs_val = get_register(rs);
       int sh = (instr->Bits(15, 11) | (instr->Bit(1) << 5));
       int mb = (instr->Bits(10, 6) | (instr->Bit(5) << 5));
-      ASSERT(sh >=0 && sh <= 63);
-      ASSERT(mb >=0 && mb <= 63);
+      DCHECK(sh >=0 && sh <= 63);
+      DCHECK(mb >=0 && mb <= 63);
       // rotate left
       uintptr_t result = (rs_val << sh) | (rs_val >> (64-sh));
       uintptr_t mask = (0xffffffffffffffff >> mb) & (0xffffffffffffffff << sh);
@@ -2979,8 +2992,8 @@ void Simulator::ExecuteExt5(Instruction* instr) {
       uintptr_t rb_val = get_register(rb);
       int sh = (rb_val & 0x3f);
       int mb = (instr->Bits(10, 6) | (instr->Bit(5) << 5));
-      ASSERT(sh >=0 && sh <= 63);
-      ASSERT(mb >=0 && mb <= 63);
+      DCHECK(sh >=0 && sh <= 63);
+      DCHECK(mb >=0 && mb <= 63);
       // rotate left
       uintptr_t result = (rs_val << sh) | (rs_val >> (64-sh));
       uintptr_t mask = 0xffffffffffffffff >> mb;
@@ -3272,7 +3285,7 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
       int offset = SIGN_EXT_IMM16(instr->Bits(15, 0));
       set_register(rt, ReadWU(ra_val+offset, instr));
       if (opcode == LWZU) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+offset);
       }
       break;
@@ -3286,7 +3299,7 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
       int offset = SIGN_EXT_IMM16(instr->Bits(15, 0));
       set_register(rt, ReadB(ra_val+offset) & 0xFF);
       if (opcode == LBZU) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+offset);
       }
       break;
@@ -3301,7 +3314,7 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
       int offset = SIGN_EXT_IMM16(instr->Bits(15, 0));
       WriteW(ra_val+offset, rs_val, instr);
       if (opcode == STWU) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+offset);
       }
       // printf("r%d %08x -> %08x\n", rs, rs_val, offset); // 0xdead
@@ -3317,7 +3330,7 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
       int offset = SIGN_EXT_IMM16(instr->Bits(15, 0));
       WriteB(ra_val+offset, rs_val);
       if (opcode == STBU) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+offset);
       }
       break;
@@ -3332,7 +3345,7 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
       uintptr_t result = ReadHU(ra_val+offset, instr) & 0xffff;
       set_register(rt, result);
       if (opcode == LHZU) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+offset);
       }
       break;
@@ -3353,7 +3366,7 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
       int offset = SIGN_EXT_IMM16(instr->Bits(15, 0));
       WriteH(ra_val+offset, rs_val, instr);
       if (opcode == STHU) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+offset);
       }
       break;
@@ -3375,7 +3388,7 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
       float *fptr = reinterpret_cast<float*>(&val);
       set_d_register_from_double(frt, static_cast<double>(*fptr));
       if (opcode == LFSU) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+offset);
       }
       break;
@@ -3390,7 +3403,7 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
       double *dptr = reinterpret_cast<double*>(ReadDW(ra_val + offset));
       set_d_register_from_double(frt, *dptr);
       if (opcode == LFDU) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+offset);
       }
       break;
@@ -3406,7 +3419,7 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
       int32_t *p=  reinterpret_cast<int32_t*>(&frs_val);
       WriteW(ra_val + offset, *p, instr);
       if (opcode == STFSU) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+offset);
       }
       break;
@@ -3422,7 +3435,7 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
       int64_t *p = reinterpret_cast<int64_t *>(&frs_val);
       WriteDW(ra_val + offset, *p);
       if (opcode == STFDU) {
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+offset);
       }
       break;
@@ -3454,7 +3467,7 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
         case 1: {  // ldu
           intptr_t *result = ReadDW(ra_val+offset);
           set_register(rt, *result);
-          ASSERT(ra != 0);
+          DCHECK(ra != 0);
           set_register(ra, ra_val+offset);
           break;
         }
@@ -3475,7 +3488,7 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
       int offset = SIGN_EXT_IMM16(instr->Bits(15, 0) & ~3);
       WriteDW(ra_val+offset, rs_val);
       if (instr->Bit(0) == 1) {  // This is the STDU form
-        ASSERT(ra != 0);
+        DCHECK(ra != 0);
         set_register(ra, ra_val+offset);
       }
       break;
@@ -3485,7 +3498,7 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
     case FAKE_OPCODE: {
       if (instr->Bits(MARKER_SUBOPCODE_BIT, MARKER_SUBOPCODE_BIT) == 1) {
         int marker_code = instr->Bits(STUB_MARKER_HIGH_BIT, 0);
-        ASSERT(marker_code < F_NEXT_AVAILABLE_STUB_MARKER);
+        DCHECK(marker_code < F_NEXT_AVAILABLE_STUB_MARKER);
         PrintF("Hit stub-marker: %d (EMIT_STUB_MARKER)\n",
                marker_code);
       } else {
@@ -3495,7 +3508,7 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
           PrintF("Simulator hit BKPT.\n");
           dbg.Debug();
         } else {
-          ASSERT(fake_opcode < fLastFaker);
+          DCHECK(fake_opcode < fLastFaker);
           PrintF("Hit ARM opcode: %d(FAKE_OPCODE defined in constant-ppc.h)\n",
                  fake_opcode);
           UNIMPLEMENTED();
@@ -3704,8 +3717,8 @@ intptr_t Simulator::Call(byte* entry, int argument_count, ...) {
   intptr_t entry_stack = (original_stack -
                           (kNumRequiredStackFrameSlots + stack_arg_count) *
                           sizeof(intptr_t));
-  if (OS::ActivationFrameAlignment() != 0) {
-    entry_stack &= -OS::ActivationFrameAlignment();
+  if (base::OS::ActivationFrameAlignment() != 0) {
+    entry_stack &= -base::OS::ActivationFrameAlignment();
   }
   // Store remaining arguments on stack, from low to high memory.
   // +2 is a hack for the LR slot + old SP on PPC
