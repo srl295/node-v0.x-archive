@@ -2140,8 +2140,8 @@ bool Simulator::ExecuteExt2_9bit_part1(Instruction* instr) {
 }
 
 
-
-void Simulator::ExecuteExt2_9bit_part2(Instruction* instr) {
+bool Simulator::ExecuteExt2_9bit_part2(Instruction* instr) {
+  bool found = true;
   int opcode = instr->Bits(9, 1) << 1;
   switch (opcode) {
     case CNTLZWX: {
@@ -2434,18 +2434,6 @@ void Simulator::ExecuteExt2_9bit_part2(Instruction* instr) {
       set_register(rt, condition_reg_);
       break;
     }
-    case ISEL: {
-      int rt = instr->RTValue();
-      int ra = instr->RAValue();
-      int rb = instr->RBValue();
-      int condition_bit = instr->RCValue();
-      int condition_mask = 0x80000000 >> condition_bit;
-      intptr_t ra_val = (ra == 0) ? 0 : get_register(ra);
-      intptr_t rb_val = get_register(rb);
-      intptr_t value = (condition_reg_ & condition_mask) ? ra_val : rb_val;
-      set_register(rt, value);
-      break;
-    }
     case STWUX:
     case STWX: {
       int rs = instr->RSValue();
@@ -2506,6 +2494,15 @@ void Simulator::ExecuteExt2_9bit_part2(Instruction* instr) {
       break;
     }
 #if V8_TARGET_ARCH_PPC64
+    case LWAX: {
+      int rt = instr->RTValue();
+      int ra = instr->RAValue();
+      int rb = instr->RBValue();
+      intptr_t ra_val = ra == 0 ? 0 : get_register(ra);
+      intptr_t rb_val = get_register(rb);
+      set_register(rt, ReadW(ra_val+rb_val, instr));
+      break;
+    }
     case LDX:
     case LDUX: {
       int rt = instr->RTValue();
@@ -2565,8 +2562,47 @@ void Simulator::ExecuteExt2_9bit_part2(Instruction* instr) {
       }
       break;
     }
+    case LHAX:
+    case LHAUX: {
+      int rt = instr->RTValue();
+      int ra = instr->RAValue();
+      int rb = instr->RBValue();
+      intptr_t ra_val = ra == 0 ? 0 : get_register(ra);
+      intptr_t rb_val = get_register(rb);
+      set_register(rt, ReadH(ra_val+rb_val, instr));
+      if (opcode == LHAUX) {
+        DCHECK(ra != 0 && ra != rt);
+        set_register(ra, ra_val+rb_val);
+      }
+      break;
+    }
     case DCBF: {
       // todo - simulate dcbf
+      break;
+    }
+    default: {
+      found = false;
+      break;
+    }
+  }
+
+  return found;
+}
+
+
+void Simulator::ExecuteExt2_5bit(Instruction* instr) {
+  int opcode = instr->Bits(5, 1) << 1;
+  switch (opcode) {
+    case ISEL: {
+      int rt = instr->RTValue();
+      int ra = instr->RAValue();
+      int rb = instr->RBValue();
+      int condition_bit = instr->RCValue();
+      int condition_mask = 0x80000000 >> condition_bit;
+      intptr_t ra_val = (ra == 0) ? 0 : get_register(ra);
+      intptr_t rb_val = get_register(rb);
+      intptr_t value = (condition_reg_ & condition_mask) ? ra_val : rb_val;
+      set_register(rt, value);
       break;
     }
     default: {
@@ -2584,7 +2620,9 @@ void Simulator::ExecuteExt2(Instruction* instr) {
     // Now look at the lesser encodings
     if (ExecuteExt2_9bit_part1(instr))
         return;
-    ExecuteExt2_9bit_part2(instr);
+    if (ExecuteExt2_9bit_part2(instr))
+        return;
+    ExecuteExt2_5bit(instr);
 }
 
 
@@ -3345,7 +3383,6 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
       uintptr_t result = ReadHU(ra_val+offset, instr) & 0xffff;
       set_register(rt, result);
       if (opcode == LHZU) {
-        DCHECK(ra != 0);
         set_register(ra, ra_val+offset);
       }
       break;
@@ -3353,7 +3390,15 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
 
     case LHA:
     case LHAU: {
-      UNIMPLEMENTED();
+      int ra = instr->RAValue();
+      int rt = instr->RTValue();
+      intptr_t ra_val = ra == 0 ? 0 : get_register(ra);
+      int offset = SIGN_EXT_IMM16(instr->Bits(15, 0));
+      intptr_t result = ReadH(ra_val+offset, instr);
+      set_register(rt, result);
+      if (opcode == LHAU) {
+        set_register(ra, ra_val+offset);
+      }
       break;
     }
 
