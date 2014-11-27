@@ -251,6 +251,11 @@ parser.add_option('--with-intl',
     dest='with_intl',
     help='Intl mode: none, full-icu, small-icu (default is none)')
 
+parser.add_option('--with-icu-source',
+    action='store',
+    dest='with_icu_source',
+    help='Intl mode: optional path to ICU tarball')
+
 parser.add_option('--with-perfctr',
     action='store_true',
     dest='with_perfctr',
