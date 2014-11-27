@@ -329,5 +329,9 @@ assert.throws(function() {
 });
 
 assert.throws(function() {
+  smalloc.dispose(new Uint8Array(new ArrayBuffer(1)));
+});
+
+assert.throws(function() {
   smalloc.dispose({});
 });
