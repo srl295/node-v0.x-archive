@@ -254,7 +254,7 @@ parser.add_option('--with-intl',
 parser.add_option('--with-icu-source',
     action='store',
     dest='with_icu_source',
-    help='Intl mode: optional path to ICU zip or existing icu directory.')
+    help='Intl mode: optional local path to ICU source archive or existing icu directory.')
 
 parser.add_option('--with-perfctr',
     action='store_true',

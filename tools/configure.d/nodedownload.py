@@ -5,6 +5,7 @@ import urllib
 import hashlib
 import sys
 import zipfile
+import tarfile
 
 def formatSize(amt):
     """Format a size as a string in MB"""
@@ -50,8 +51,23 @@ def md5sum(targetfile):
         chunk = f.read(1024)
     return digest.hexdigest()
 
+def unpackWithMode(unpacker, packedfile, parent_path, mode):
+    with unpacker.open(packedfile, mode) as icuzip:
+        print ' Extracting source file: %s' % packedfile
+        icuzip.extractall(parent_path)
+
 def unpack(packedfile, parent_path):
     """Unpack packedfile into parent_path. Assumes .zip."""
-    with zipfile.ZipFile(packedfile, 'r') as icuzip:
-        print ' Extracting source zip: %s' % packedfile
-        icuzip.extractall(parent_path)
+    packedsuffix = packedfile.lower().split('.')[-1]  # .zip, .tgz etc
+    if zipfile.is_zipfile(packedfile):
+        unpackWithMode(zipfile.ZipFile, packedfile, parent_path, 'r')
+    elif tarfile.is_tarfile(packedfile):
+        # if (packedsuffix == 'tgz') or (packedsuffix == 'gz'):
+        #     unpackWithMode(tarfile.TarFile, packedfile, parent_path, 'r:gz')
+        # elif (packedsuffix == 'bz2') or (packedsuffix == 'tb2'):
+        #     unpackWithMode(tarfile.TarFile, packedfile, parent_path, 'r:bz2')
+        # else:
+            unpackWithMode(tarfile.TarFile, packedfile, parent_path, 'r')
+            #raise Exception('Error: Don\'t know how to unpack tarfile %s with extension %s' % (packedfile, packedsuffix))
+    else:
+        raise Exception('Error: Don\'t know how to unpack %s with extension %s' % (packedfile, packedsuffix))
