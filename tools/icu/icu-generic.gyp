@@ -15,7 +15,7 @@
       # a target for additional uconfig defines, target only
       'target_name': 'icu_uconfig_target',
       'type': 'none',
-      'toolsets': [ 'target' ],
+      'toolsets': [ 'target', 'host' ],
       'direct_dependent_settings': {
         'defines': [
           'UCONFIG_NO_CONVERSION=1',
@@ -104,7 +104,7 @@
     {
       'target_name': 'icui18n',
       'type': '<(library)',
-      'toolsets': [ 'target' ],
+      'toolsets': [ 'target', 'host' ],
       'sources': [
         '<@(icu_src_i18n)'
       ],
@@ -174,7 +174,7 @@
     {
       'target_name': 'icudata',
       'type': '<(library)',
-      'toolsets': [ 'target' ],
+      'toolsets': [ 'target', 'host' ],
       'conditions': [
         [ 'OS == "win"', {
           'conditions': [
@@ -328,7 +328,7 @@
     {
       'target_name': 'icustubdata',
       'type': '<(library)',
-      'toolsets': [ 'target' ],
+      'toolsets': [ 'target', 'host' ],
       'dependencies': [ 'icu_implementation' ],
       'sources': [
         '<@(icu_src_stubdata)'
@@ -343,7 +343,7 @@
     {
       'target_name': 'icuuc',
       'type': 'none',
-      'toolsets': [ 'target' ],
+      'toolsets': [ 'target', 'host' ],
       'dependencies': [ 'icuucx', 'icudata' ],
       'export_dependent_settings': [ 'icuucx', 'icudata' ],
     },
@@ -352,7 +352,7 @@
       'target_name': 'icuucx',
       'type': '<(library)',
       'dependencies': [ 'icu_implementation', 'icu_uconfig', 'icu_uconfig_target' ],
-      'toolsets': [ 'target' ],
+      'toolsets': [ 'target', 'host' ],
       'sources': [
         '<@(icu_src_common)',
       ],
