@@ -323,6 +323,11 @@
               'libraries': [ '-lAdvAPI32.Lib', '-lUser32.lib' ],
             },
           }],
+          [ 'OS=="aix"', {
+            'link_settings': {
+              'libraries': [ '-lpthread' ],
+            },
+          }],
         ],
       },
     },
@@ -363,6 +368,11 @@
           [ 'OS=="win"', {
             'link_settings': {
               'libraries': [ '-lAdvAPI32.Lib', '-lUser32.lib' ],
+            },
+          }],
+          [ 'OS=="aix"', {
+            'link_settings': {
+              'libraries': [ '-lpthread' ],
             },
           }],
         ],
