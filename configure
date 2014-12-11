@@ -262,6 +262,11 @@ parser.add_option('--with-icu-source',
     dest='with_icu_source',
     help='Intl mode: optional local path to icu/ dir, or path/URL of icu source archive.')
 
+parser.add_option('--icu-data-dir',
+    action='store',
+    dest='icu_data_dir',
+    help='Path to the directory from which ICU loads its data')
+
 parser.add_option('--with-perfctr',
     action='store_true',
     dest='with_perfctr',
@@ -494,7 +499,7 @@ def configure_arm(o):
 def configure_node(o):
   if options.dest_os == 'android':
     o['variables']['OS'] = 'android'
-  o['variables']['node_prefix'] = os.path.expanduser(options.prefix or '')
+  o['variables']['node_prefix'] = expanded_prefix
   o['variables']['node_install_npm'] = b(not options.without_npm)
   o['default_configuration'] = 'Debug' if options.debug else 'Release'
 
@@ -769,9 +774,28 @@ def configure_intl(o):
 
   # always set icu_small, node.gyp depends on it being defined.
   o['variables']['icu_small'] = b(False)
+  # Unless we specify --icu-data-dir or --with-intl=stub-icu at configure
+  # time, then the ICU data embedded in node's binary is not the stubbed data
+  o['variables']['icu_stub'] = b(False)
 
   with_intl = options.with_intl
   with_icu_source = options.with_icu_source
+
+  if options.icu_data_dir:
+    options.icu_data_dir = os.path.expanduser(options.icu_data_dir)
+    o['variables']['icu_data_dir'] = options.icu_data_dir
+
+    icu_data_dir_define = options.icu_data_dir
+    if not os.path.isabs(icu_data_dir_define):
+      icu_data_dir_define = os.path.join(expanded_prefix,
+                                         icu_data_dir_define)
+    o['defines'] += [ 'ICU_DATA_DIR="' + icu_data_dir_define + '"']
+
+    # When supplying --icu-data-dir, the node binary is linked to ICU's stub
+    # data. The actual ICU data is generated in a separate file and is loaded
+    # from the dir pointed to by --icu-data-dir
+    with_intl = 'stub-icu'
+
   have_icu_path = bool(options.with_icu_path)
   if have_icu_path and with_intl:
     print 'Error: Cannot specify both --with-icu-path and --with-intl'
@@ -806,6 +830,9 @@ def configure_intl(o):
   elif with_intl == 'full-icu':
     # full ICU
     o['variables']['v8_enable_i18n_support'] = 1
+  elif with_intl == 'stub-icu':
+    o['variables']['v8_enable_i18n_support'] = 1
+    o['variables']['icu_stub'] = b(True)
   elif with_intl == 'system-icu':
     # ICU from pkg-config.
     o['variables']['v8_enable_i18n_support'] = 1
@@ -979,6 +1006,8 @@ output = {
   'cflags': [],
 }
 
+expanded_prefix = os.path.expanduser(options.prefix or
+  '/usr/local')
 configure_node(output)
 configure_libz(output)
 configure_http_parser(output)
@@ -1010,8 +1039,7 @@ config = {
   'PYTHON': sys.executable,
 }
 
-if options.prefix:
-  config['PREFIX'] = options.prefix
+config['PREFIX'] = expanded_prefix
 
 config = '\n'.join(map('='.join, config.iteritems())) + '\n'
 

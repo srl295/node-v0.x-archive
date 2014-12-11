@@ -25,6 +25,7 @@ def abspath(*args):
 def load_config():
   s = open('config.gypi').read()
   s = re.sub(r'#.*?\n', '', s) # strip comments
+  s = re.sub(r'"', '\\"', s) # escape double quotes
   s = re.sub(r'\'', '"', s) # convert quotes
   return json.loads(s)
 
@@ -171,6 +172,12 @@ def files(action):
       'deps/zlib/zconf.h',
       'deps/zlib/zlib.h',
     ], 'include/node/')
+
+  icu_data_dir = variables.get('icu_data_dir')
+  if None != icu_data_dir:
+    icu_data_file = variables.get('icu_data_file')
+    action([os.path.join('out/Release', icu_data_file)],
+            os.path.join(icu_data_dir, icu_data_file))
 
 def run(args):
   global node_prefix, install_path, target_defaults, variables

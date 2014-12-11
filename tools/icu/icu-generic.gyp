@@ -354,8 +354,30 @@
           'export_dependent_settings': [ 'icutools' ],
         }],
         ['_toolset=="target"', {
-          'dependencies': [ 'icuucx', 'icudata' ],
-          'export_dependent_settings': [ 'icuucx', 'icudata' ],
+          'conditions': [
+            [ 'icu_stub == "false"',
+              {
+                'dependencies': [ 'icuucx', 'icudata' ],
+                'export_dependent_settings': [ 'icuucx', 'icudata' ]
+              },
+              {
+                'dependencies': [ 'icuucx', 'icustubdata', 'icupkg#host' ],
+                'export_dependent_settings': [ 'icuucx', 'icustubdata' ],
+                'actions': [
+                {
+                   # Swap endianness (if needed), or at least copy the file
+                   'action_name': 'icupkg',
+                   'inputs': [ '<(icu_data_in)' ],
+                   'outputs':[ '<(SHARED_INTERMEDIATE_DIR)/<(icu_data_file)' ],
+                   'action': [ '<(PRODUCT_DIR)/icupkg',
+                               '-t<(icu_endianness)',
+                               '<@(_inputs)',
+                               '<@(_outputs)',
+                             ],
+                }],
+              },
+            ],
+          ],
         }],
       ],
     },

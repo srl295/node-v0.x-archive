@@ -5,7 +5,6 @@ PYTHON ?= python
 NINJA ?= ninja
 DESTDIR ?=
 SIGN ?=
-PREFIX ?= /usr/local
 
 NODE ?= ./node
 
@@ -294,10 +293,10 @@ pkg: $(PKG)
 $(PKG): release-only
 	rm -rf $(PKGDIR)
 	rm -rf out/deps out/Release
-	$(PYTHON) ./configure --without-snapshot --dest-cpu=ia32 --tag=$(TAG)
+	$(PYTHON) ./configure --icu-data-dir=share/node/i18n --without-snapshot --dest-cpu=ia32 --tag=$(TAG)
 	$(MAKE) install V=$(V) DESTDIR=$(PKGDIR)/32
 	rm -rf out/deps out/Release
-	$(PYTHON) ./configure --without-snapshot --dest-cpu=x64 --tag=$(TAG)
+	$(PYTHON) ./configure --icu-data-dir=share/node/i18n --without-snapshot --dest-cpu=x64 --tag=$(TAG)
 	$(MAKE) install V=$(V) DESTDIR=$(PKGDIR)
 	SIGN="$(APP_SIGN)" PKGDIR="$(PKGDIR)" bash tools/osx-codesign.sh
 	lipo $(PKGDIR)/32/usr/local/bin/node \
