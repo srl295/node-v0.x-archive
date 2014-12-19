@@ -45,8 +45,15 @@
 
 #if defined(NODE_HAVE_I18N_SUPPORT)
 
+#include "uv.h"
+#include <limits.h>  // PATH_MAX
 #include <unicode/putil.h>
 #include <unicode/udata.h>
+
+#ifndef NODE_EXEPATH_ICUDIR
+#define NODE_EXEPATH_ICUDIR "../share/node/icu/"
+// TODO: if  windows, mac, ...
+#endif
 
 #ifdef NODE_HAVE_SMALL_ICU
 /* if this is defined, we have a 'secondary' entry point.
@@ -66,6 +73,44 @@ extern "C" const char U_DATA_API SMALL_ICUDATA_ENTRY_POINT[];
 namespace node {
 namespace i18n {
 
+/**
+ * Modify 'path' to remove the final (leaf) entry.
+ *   so /path/to/something  -> /path/to
+ *  and /path/to/dir/   -> /path/to/dir
+ */
+static char* my_dirname(char* path) {
+  char *p = strrchr(path, U_FILE_SEP_CHAR);
+#if ( (U_FILE_SEP_CHAR) != (U_FILE_ALT_SEP_CHAR) )
+  // windows: use '/' if further out than '\'
+  char *p2 = strrchr(path, U_FILE_ALT_SEP_CHAR);
+  if(p && p2 && (p2>p)) p = p2;
+#endif
+  if(p) {
+    *p = 0;
+  }
+  return path;
+}
+
+#if NODE_HAVE_SMALL_ICU
+/**
+  * @return true if path is a directory
+  */
+static bool my_isdir(const char* path) {
+  int r;
+  uv_fs_t req;
+  r = uv_fs_stat(uv_default_loop(), &req, path, NULL);
+  bool ret = ((r == 0) && (req.result == 0) && (req.statbuf.st_mode & S_IFDIR));
+  printf("my_isdir %s = %c\n", path, (ret)?'T':'f');
+  printf("r: %d, result: %d, flags: %x\n", r, req.result, req.statbuf.st_flags);
+  //printf("#: %x\n", ((uv_stat_t*)req.ptr)->st_mode);
+  puts(uv_strerror(r));
+  uv_fs_req_cleanup(&req);
+  return ret;
+}
+
+
+#endif
+
 bool InitializeICUDirectory(const char* icu_data_path) {
   if (icu_data_path != NULL) {
     u_setDataDirectory(icu_data_path);
@@ -73,8 +118,39 @@ bool InitializeICUDirectory(const char* icu_data_path) {
   } else {
     UErrorCode status = U_ZERO_ERROR;
 #ifdef NODE_HAVE_SMALL_ICU
+    bool doSetCommonData = true; //< true iff we should call setCommonData
+#endif
+    // get the exe path
+    size_t exec_path_len = 2 * PATH_MAX;
+    char* exec_path = new char[exec_path_len];
+    char* exec_subpath = new char[exec_path_len];
+    if (uv_exepath(exec_path, &exec_path_len) == 0) {
+      // TODO strNcat!
+      ::strcpy(exec_subpath, exec_path);
+      my_dirname(exec_subpath); // trim off '/node'
+      ::strcat(exec_subpath, U_FILE_SEP_STRING); // "/"-ish
+      ::strcat(exec_subpath, NODE_EXEPATH_ICUDIR);
+
+      // always set the path. May or may not be extant
+      u_setDataDirectory(exec_subpath);
+
+#ifdef NODE_HAVE_SMALL_ICU
+      // in the small-icu case, we should check whether this
+      // directory actually exists.
+      if (my_isdir(exec_subpath)) {
+          puts("skipping setcommondata");
+          doSetCommonData = false;
+      }
+#endif
+    }
+    delete [] exec_path;
+    delete [] exec_subpath;
+
+#ifdef NODE_HAVE_SMALL_ICU
     // install the 'small' data.
-    udata_setCommonData(&SMALL_ICUDATA_ENTRY_POINT, &status);
+    if (doSetCommonData) {
+      udata_setCommonData(&SMALL_ICUDATA_ENTRY_POINT, &status);
+    }
 #else  // !NODE_HAVE_SMALL_ICU
     // no small data, so nothing to do.
 #endif  // !NODE_HAVE_SMALL_ICU
