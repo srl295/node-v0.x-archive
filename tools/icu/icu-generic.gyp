@@ -19,6 +19,13 @@
       'direct_dependent_settings': {
         'defines': [
           'UCONFIG_NO_CONVERSION=1',
+          'UCONFIG_NO_IDNA=1',
+          'UCONFIG_NO_REGULAR_EXPRESSIONS=1',
+          'UCONFIG_NO_TRANSLITERATION=1',
+          # TODO(srl295): reenable following pending
+          # https://code.google.com/p/v8/issues/detail?id=3345
+          # (saves some space)
+          'UCONFIG_NO_BREAK_ITERATION=0',
         ]
       },
     },
@@ -30,19 +37,12 @@
       'toolsets': [ 'host', 'target' ],
       'direct_dependent_settings': {
         'defines': [
-          'UCONFIG_NO_IDNA=1',
-          'UCONFIG_NO_TRANSLITERATION=1',
           'UCONFIG_NO_SERVICE=1',
-          'UCONFIG_NO_REGULAR_EXPRESSIONS=1',
           'U_ENABLE_DYLOAD=0',
           'U_STATIC_IMPLEMENTATION=1',
           # Don't need std::string in API.
           # Also, problematic: <http://bugs.icu-project.org/trac/ticket/11333>
           'U_HAVE_STD_STRING=0',
-          # TODO(srl295): reenable following pending
-          # https://code.google.com/p/v8/issues/detail?id=3345
-          # (saves some space)
-          'UCONFIG_NO_BREAK_ITERATION=0',
         ],
       }
     },
