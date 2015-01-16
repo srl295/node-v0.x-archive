@@ -30,7 +30,6 @@
       'toolsets': [ 'host', 'target' ],
       'direct_dependent_settings': {
         'defines': [
-          'UCONFIG_NO_LEGACY_CONVERSION=1',
           'UCONFIG_NO_IDNA=1',
           'UCONFIG_NO_TRANSLITERATION=1',
           'UCONFIG_NO_SERVICE=1',
